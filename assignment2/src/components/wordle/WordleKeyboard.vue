@@ -27,7 +27,9 @@
     </div>
 
     <div class="kb-row">
-      <v-btn size="small" class="kb-key wide" @click="emit('press', 'ENTER')">Enter</v-btn>
+      <v-btn size="small" class="kb-key wide" @click="emit('press', 'ENTER')">
+        Enter
+      </v-btn>
 
       <v-btn
         v-for="k in row3"
@@ -67,22 +69,68 @@ function keyClass(k: string) {
 </script>
 
 <style scoped>
+/* ✅ Take full available width and allow scaling down */
 .kb {
+  width: 100%;
+  max-width: 520px;
+  margin-inline: auto;
   display: grid;
   gap: 10px;
-  max-width: 520px;
+
+  /* avoids padding/gaps causing overflow */
+  box-sizing: border-box;
+  padding-inline: 6px;
 }
+
+/* ✅ Keep rows single-line but let keys shrink */
 .kb-row {
   display: flex;
   gap: 6px;
   justify-content: center;
   flex-wrap: nowrap;
+  width: 100%;
 }
+
+/*
+  ✅ The key to responsiveness:
+  - flex: 1 1 0 => all keys share available space evenly
+  - min-width: 0 => allows shrinking smaller than content width
+*/
 .kb-key {
-  min-width: 36px;
+  flex: 1 1 0;
+  min-width: 0;
+
+  /* make height and font responsive */
+  height: clamp(38px, 6.5vh, 48px);
+  font-size: clamp(0.72rem, 2.2vw, 0.95rem);
+
+  /* reduce default Vuetify button padding so they fit */
+  padding-inline: 0 !important;
+
+  /* prevent the label from forcing width */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+/* wide keys get more share, but still shrink if needed */
 .wide {
-  min-width: 70px;
+  flex: 1.6 1 0;
+}
+
+/* Slightly tighter on very small screens */
+@media (max-width: 360px) {
+  .kb {
+    gap: 8px;
+    padding-inline: 4px;
+  }
+  .kb-row {
+    gap: 4px;
+  }
+  .kb-key {
+    height: clamp(34px, 6.2vh, 44px);
+    font-size: clamp(0.68rem, 2.6vw, 0.9rem);
+  }
 }
 
 /* NYT-ish colors */

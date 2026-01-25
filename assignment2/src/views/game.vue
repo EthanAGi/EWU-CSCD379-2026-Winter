@@ -4,7 +4,6 @@
       <h1 class="text-h4">EWU Wordle</h1>
 
       <div class="d-flex ga-2">
-        <!-- ✅ Buttons swapped: NYT first, Random second -->
         <v-btn
           size="small"
           :disabled="nytLocked"
@@ -24,17 +23,10 @@
       </div>
     </div>
 
-    <!-- ✅ Session stats display -->
     <div class="d-flex flex-wrap ga-3 mb-3">
-      <div class="text-body-2">
-        <b>Wins:</b> {{ stats.wins }}
-      </div>
-      <div class="text-body-2">
-        <b>Losses:</b> {{ stats.losses }}
-      </div>
-      <div class="text-body-2">
-        <b>Avg attempts (wins):</b> {{ avgAttemptsDisplay }}
-      </div>
+      <div class="text-body-2"><b>Wins:</b> {{ stats.wins }}</div>
+      <div class="text-body-2"><b>Losses:</b> {{ stats.losses }}</div>
+      <div class="text-body-2"><b>Avg attempts (wins):</b> {{ avgAttemptsDisplay }}</div>
     </div>
 
     <div v-if="nytLocked" class="text-caption mb-3">
@@ -46,14 +38,11 @@
       <div class="mt-2">Loading word...</div>
     </div>
 
-    <!-- ✅ CENTERED + RESPONSIVE PLAY AREA -->
     <div class="play-area">
-      <!-- Board (submissions) -->
       <div class="board-wrap">
         <WordleBoard :rows="rows" :shakeRow="shakeRow" />
       </div>
 
-      <!-- Guess button centered under board -->
       <div class="guess-wrap">
         <v-btn
           variant="outlined"
@@ -64,7 +53,6 @@
         </v-btn>
       </div>
 
-      <!-- Keyboard centered and scaled -->
       <div class="keyboard-wrap">
         <WordleKeyboard :keyStates="keyStates" @press="onKey" />
       </div>
@@ -74,7 +62,8 @@
       {{ snack.text }}
     </v-snackbar>
 
-    <v-dialog v-model="showEndDialog" max-width="520">
+    <!-- ✅ FIX: v-dialog needs a writable ref, not a read-only computed -->
+    <v-dialog v-model="endDialogOpen" max-width="520">
       <v-card>
         <v-card-title>{{ status === "won" ? "You win!" : "You lose!" }}</v-card-title>
 
@@ -117,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import WordleBoard from "../components/wordle/WordleBoard.vue";
 import WordleKeyboard from "../components/wordle/WordleKeyboard.vue";
 import { scoreGuess, mergeKeyState, type LetterState } from "../game/score";
@@ -132,8 +121,6 @@ import {
 
 import { getSuggestedGuess } from "../game/hint";
 
-// ✅ TileState is what the BOARD renders.
-// Submitted guesses use LetterState; blanks use "empty".
 type TileState = "empty" | LetterState;
 type Tile = { letter: string; state: TileState };
 
@@ -152,31 +139,34 @@ const keyStates = ref<Record<string, LetterState>>({});
 const shakeRow = ref<number | null>(null);
 
 const snack = ref<{ show: boolean; text: string }>({ show: false, text: "" });
-const showEndDialog = computed<boolean>(() => status.value !== "playing");
+
+// ✅ FIX: dialog must be a writable ref for Vuetify v-model
+const endDialogOpen = ref<boolean>(false);
 
 const definition = ref<string | null>(null);
 const defLoading = ref<boolean>(false);
 
-// ✅ Store ONLY submitted guess result states (no "empty" here)
 const guessStates = ref<LetterState[][]>([]);
-
 const nytLocked = ref<boolean>(false);
 
-/**
- * ✅ Default to NYT mode.
- * We’ll finalize the actual starting mode in onMounted():
- * - If NYT is locked for today, start Random.
- * - Else start NYT.
- */
 const mode = ref<GameMode>("nyt");
 
+// keep dialog synced to game status
+watch(
+  status,
+  (s) => {
+    endDialogOpen.value = s !== "playing";
+  },
+  { immediate: true },
+);
+
 // -----------------------------
-// ✅ Session stats (per browser session)
+// Session stats
 // -----------------------------
 type SessionStats = {
   wins: number;
   losses: number;
-  winAttemptsTotal: number; // sum of attempts used to win (for average)
+  winAttemptsTotal: number;
 };
 
 const SS_STATS = "ewu_wordle_stats_v1";
@@ -187,7 +177,6 @@ const stats = ref<SessionStats>({
   winAttemptsTotal: 0,
 });
 
-// guard so we only count a game once
 const gameCounted = ref<boolean>(false);
 
 function loadStats(): void {
@@ -200,17 +189,13 @@ function loadStats(): void {
       losses: Number(parsed.losses ?? 0) || 0,
       winAttemptsTotal: Number(parsed.winAttemptsTotal ?? 0) || 0,
     };
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function saveStats(): void {
   try {
     sessionStorage.setItem(SS_STATS, JSON.stringify(stats.value));
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function recordWin(attemptsUsed: number): void {
@@ -290,7 +275,7 @@ function cleanupOldAttemptKeys(keepDays = 14): void {
 }
 
 // -----------------------------
-// Session persistence
+// Session persistence (random)
 // -----------------------------
 const SS_MODE = "ewu_wordle_mode";
 const SS_RANDOM_WORD = "ewu_wordle_random_word";
@@ -404,7 +389,6 @@ async function loadGameWord(opts?: { forceNewRandom?: boolean; reason?: string }
     dbg("loadGameWord()", { mode: mode.value, reason, forceNewRandom });
 
     if (mode.value === "random") {
-      // ✅ Do NOT change solution if player has started guessing
       if (guesses.value.length > 0 || isInProgress()) {
         dbg("random: keeping solution =", solution.value);
         return;
@@ -432,7 +416,6 @@ async function loadGameWord(opts?: { forceNewRandom?: boolean; reason?: string }
       return;
     }
 
-    // ✅ NYT mode
     const w = await getPlayableWord("nyt");
     solution.value = w.toUpperCase();
     dbg("nyt: solution =", solution.value);
@@ -459,7 +442,9 @@ function resetBoardState() {
   defLoading.value = false;
   setInProgress(false);
 
-  // ✅ allow stats to count again for the next game
+  // close dialog when starting a new game
+  endDialogOpen.value = false;
+
   gameCounted.value = false;
 
   if (mode.value === "random") clearRandomState();
@@ -553,21 +538,15 @@ async function endGame(as: "won" | "lost"): Promise<void> {
   status.value = as;
   setInProgress(false);
 
-  // ✅ record stats exactly once per game
   if (!gameCounted.value) {
     gameCounted.value = true;
-    if (as === "won") {
-      recordWin(guesses.value.length);
-    } else {
-      recordLoss();
-    }
+    if (as === "won") recordWin(guesses.value.length);
+    else recordLoss();
   }
 
-  if (mode.value === "random") {
-    clearSavedRandomWord();
-    clearRandomState();
-    dbg("random: game ended -> cleared saved random word + random state");
-  }
+  // ✅ IMPORTANT: Do NOT clear random state here.
+  // Clearing here can make the UI look like it "reset" right on a win.
+  // We clear on Restart instead.
 
   if (as === "won") {
     defLoading.value = true;
@@ -590,7 +569,8 @@ async function endGame(as: "won" | "lost"): Promise<void> {
     dbg("nyt: ended -> auto-switched mode to random");
   }
 
-  saveRandomState();
+  // persist finished state if random (so refresh doesn't lose the win screen)
+  if (mode.value === "random") saveRandomState();
 }
 
 async function submitGuess(): Promise<void> {
@@ -624,11 +604,13 @@ async function submitGuess(): Promise<void> {
   guessStates.value.push(statesForMerge);
   setInProgress(true);
 
-  saveRandomState();
+  if (mode.value === "random") {
+    saveRandomState();
 
-  if (mode.value === "random" && guesses.value.length >= RANDOM_CLEAR_AFTER_GUESSES) {
-    clearSavedRandomWord();
-    dbg("random: reached 5 guesses -> cleared saved random word for next game");
+    if (guesses.value.length >= RANDOM_CLEAR_AFTER_GUESSES) {
+      clearSavedRandomWord();
+      dbg("random: reached 5 guesses -> cleared saved random word for next game");
+    }
   }
 
   currentGuess.value = "";
@@ -642,7 +624,7 @@ async function submitGuess(): Promise<void> {
     await endGame("lost");
   }
 
-  saveRandomState();
+  if (mode.value === "random") saveRandomState();
 }
 
 function onKey(k: string) {
@@ -689,6 +671,7 @@ async function restart(): Promise<void> {
   resetBoardState();
 
   if (mode.value === "random") {
+    // ✅ clear random word + state when starting a new random game
     clearSavedRandomWord();
     clearRandomState();
     dbg("random: restart -> cleared saved random word + random state");
@@ -724,10 +707,11 @@ onMounted(() => {
 
   if (mode.value === "random") {
     const restored = restoreRandomState();
-    if (restored && guesses.value.length > 0 && status.value === "playing") {
-      dbg("random: restored in-progress state", {
+    if (restored && (guesses.value.length > 0 || status.value !== "playing")) {
+      dbg("random: restored state", {
         solution: solution.value,
         guesses: guesses.value.length,
+        status: status.value,
       });
       loading.value = false;
       return;
@@ -744,7 +728,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* ✅ Safe-area aware bottom padding so the keyboard never gets clipped on mobile */
 .play-area {
   display: flex;
   flex-direction: column;
@@ -753,32 +736,27 @@ onBeforeUnmount(() => {
   width: 100%;
   margin-inline: auto;
 
-  /* This makes room for iOS bottom bar + browser UI */
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   gap: 16px;
 }
 
-/* Board wrapper scales with viewport, but doesn't get absurdly wide */
 .board-wrap {
   width: min(92vw, 420px);
   display: flex;
   justify-content: center;
 }
 
-/* Button centered under board */
 .guess-wrap {
   width: min(92vw, 520px);
   display: flex;
   justify-content: center;
 }
 
-/* Keyboard wrapper: centered + responsive width + extra bottom buffer */
 .keyboard-wrap {
   width: min(96vw, 520px);
   display: flex;
   justify-content: center;
 
-  /* extra breathing room below keyboard */
   margin-bottom: 12px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
