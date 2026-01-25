@@ -38,6 +38,13 @@
       <div class="mt-2">Loading word...</div>
     </div>
 
+    <!-- 👁️ Timed creepy message -->
+    <Transition name="fade">
+      <div v-if="watchMsgVisible" class="watch-msg" role="status" aria-live="polite">
+        You feel like you are being watched
+      </div>
+    </Transition>
+
     <div class="play-area">
       <div class="board-wrap">
         <WordleBoard :rows="rows" :shakeRow="shakeRow" />
@@ -156,6 +163,43 @@ watch(
   },
   { immediate: true },
 );
+
+// -----------------------------
+// 👁️ Timed fade-in/out message
+// - show after 3 minutes on page
+// - stay visible ~8 seconds
+// -----------------------------
+const watchMsgVisible = ref<boolean>(false);
+let watchShowTimer: number | null = null;
+let watchHideTimer: number | null = null;
+let watchTriggered = false;
+
+function scheduleWatchMessage(): void {
+  // only schedule once per mount
+  if (watchTriggered) return;
+  watchTriggered = true;
+
+  // show after 3 minutes (180,000ms)
+  watchShowTimer = window.setTimeout(() => {
+    watchMsgVisible.value = true;
+
+    // hide after ~8 seconds
+    watchHideTimer = window.setTimeout(() => {
+      watchMsgVisible.value = false;
+    }, 4000);
+  }, 10000);
+}
+
+function clearWatchMessageTimers(): void {
+  if (watchShowTimer !== null) {
+    window.clearTimeout(watchShowTimer);
+    watchShowTimer = null;
+  }
+  if (watchHideTimer !== null) {
+    window.clearTimeout(watchHideTimer);
+    watchHideTimer = null;
+  }
+}
 
 // -----------------------------
 // Session stats
@@ -576,7 +620,6 @@ async function submitGuess(): Promise<void> {
     return;
   }
 
-  // ✅ NEW: disallow duplicate guesses (shake same as invalid word)
   const alreadyGuessed = guesses.value.some((x) => x.toUpperCase() === g);
   if (alreadyGuessed) {
     showMessage("Already guessed.");
@@ -687,6 +730,9 @@ function onVisibilityChange() {
 }
 
 onMounted(() => {
+  // schedule the creepy message
+  scheduleWatchMessage();
+
   loadStats();
 
   cleanupOldAttemptKeys();
@@ -722,10 +768,44 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeyDown);
   document.removeEventListener("visibilitychange", onVisibilityChange);
+
+  clearWatchMessageTimers();
 });
 </script>
 
 <style scoped>
+/* Fade transition for the creepy message */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 650ms ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Positioned banner */
+.watch-msg {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 3000;
+
+  padding: 10px 14px;
+  border-radius: 10px;
+
+  background: rgba(0, 0, 0, 0.78);
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+
+  /* keep it readable on small screens */
+  max-width: min(92vw, 520px);
+  text-align: center;
+  pointer-events: none;
+}
+
 .play-area {
   display: flex;
   flex-direction: column;

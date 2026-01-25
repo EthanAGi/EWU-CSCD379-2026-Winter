@@ -1,15 +1,71 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
-import HelloWorld from './components/HelloWorld.vue'
+import { RouterView } from "vue-router";
+import { onMounted, onBeforeUnmount, ref } from "vue";
+
+/**
+ * Timing constants (same behavior as HomeView)
+ */
+const APPEAR_INTERVAL_MS = 15 * 1000;
+const VISIBLE_DURATION_MS = 4 * 1000;
+
+const showSecret = ref(false);
+
+let intervalId: number | null = null;
+let hideTimeoutId: number | null = null;
+let firstTimeoutId: number | null = null;
+
+function showSecretTemporarily() {
+  showSecret.value = true;
+
+  if (hideTimeoutId !== null) {
+    clearTimeout(hideTimeoutId);
+    hideTimeoutId = null;
+  }
+
+  hideTimeoutId = window.setTimeout(() => {
+    showSecret.value = false;
+    hideTimeoutId = null;
+  }, VISIBLE_DURATION_MS);
+}
+
+onMounted(() => {
+  firstTimeoutId = window.setTimeout(() => {
+    showSecretTemporarily();
+
+    intervalId = window.setInterval(() => {
+      showSecretTemporarily();
+    }, APPEAR_INTERVAL_MS);
+  }, APPEAR_INTERVAL_MS);
+});
+
+onBeforeUnmount(() => {
+  if (intervalId !== null) clearInterval(intervalId);
+  if (hideTimeoutId !== null) clearTimeout(hideTimeoutId);
+  if (firstTimeoutId !== null) clearTimeout(firstTimeoutId);
+});
 </script>
 
 <template>
   <v-app>
     <v-main>
       <v-container class="py-6">
-        <div class="d-flex ga-2 mb-6">
+        <!-- 🔹 NAV BAR -->
+        <div class="d-flex ga-2 mb-6 align-center">
           <v-btn to="/" variant="outlined">Home</v-btn>
           <v-btn to="/game" color="primary">Game</v-btn>
+
+          <!-- 🔒 Secret nav button -->
+          <transition name="fade">
+            <v-btn
+              v-if="showSecret"
+              to="/secret"
+              color="secondary"
+              class="secret-btn"
+              variant="outlined"
+            >
+              Secret
+            </v-btn>
+          </transition>
         </div>
 
         <RouterView />
@@ -18,67 +74,61 @@ import HelloWorld from './components/HelloWorld.vue'
   </v-app>
 </template>
 
-
 <style scoped>
-header {
-  line-height: 1.5;
-  max-height: 100vh;
+/* ✨ Fade animation */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.8s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
+/* =========================
+   Secret button effects
+   ========================= */
+
+.secret-btn {
+  position: relative;
+
+  animation:
+    secret-pulse 1.15s ease-in-out infinite,
+    secret-whisper 1.4s ease-in-out infinite,
+    secret-shake 3.2s ease-in-out infinite;
 }
 
-nav {
-  width: 100%;
-  font-size: 12px;
-  text-align: center;
-  margin-top: 2rem;
+/* Pulse */
+@keyframes secret-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
-nav a.router-link-exact-active {
-  color: var(--color-text);
-}
-
-nav a.router-link-exact-active:hover {
-  background-color: transparent;
-}
-
-nav a {
-  display: inline-block;
-  padding: 0 1rem;
-  border-left: 1px solid var(--color-border);
-}
-
-nav a:first-of-type {
-  border: 0;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
+/* Whisper glow */
+@keyframes secret-whisper {
+  0% {
+    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
+    text-shadow: 0 0 0 rgba(255, 255, 255, 0);
   }
-
-  .logo {
-    margin: 0 2rem 0 0;
+  50% {
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.35));
+    text-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
   }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
+  100% {
+    filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0));
+    text-shadow: 0 0 0 rgba(255, 255, 255, 0);
   }
+}
 
-  nav {
-    text-align: left;
-    margin-left: -1rem;
-    font-size: 1rem;
+/* Shake (brief, not constant) */
+@keyframes secret-shake {
+  0%, 84%, 100% { transform: translateX(0) scale(1); }
 
-    padding: 1rem 0;
-    margin-top: 1rem;
-  }
+  86% { transform: translateX(-2px) rotate(-1deg) scale(1.03); }
+  88% { transform: translateX(2px) rotate(1deg) scale(1.03); }
+  90% { transform: translateX(-2px) rotate(-1deg) scale(1.03); }
+  92% { transform: translateX(2px) rotate(1deg) scale(1.03); }
+  94% { transform: translateX(0) rotate(0deg) scale(1.03); }
 }
 </style>
