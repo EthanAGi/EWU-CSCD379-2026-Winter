@@ -62,7 +62,6 @@
       {{ snack.text }}
     </v-snackbar>
 
-    <!-- ✅ FIX: v-dialog needs a writable ref, not a read-only computed -->
     <v-dialog v-model="endDialogOpen" max-width="520">
       <v-card>
         <v-card-title>{{ status === "won" ? "You win!" : "You lose!" }}</v-card-title>
@@ -140,7 +139,6 @@ const shakeRow = ref<number | null>(null);
 
 const snack = ref<{ show: boolean; text: string }>({ show: false, text: "" });
 
-// ✅ FIX: dialog must be a writable ref for Vuetify v-model
 const endDialogOpen = ref<boolean>(false);
 
 const definition = ref<string | null>(null);
@@ -151,7 +149,6 @@ const nytLocked = ref<boolean>(false);
 
 const mode = ref<GameMode>("nyt");
 
-// keep dialog synced to game status
 watch(
   status,
   (s) => {
@@ -442,7 +439,6 @@ function resetBoardState() {
   defLoading.value = false;
   setInProgress(false);
 
-  // close dialog when starting a new game
   endDialogOpen.value = false;
 
   gameCounted.value = false;
@@ -544,10 +540,6 @@ async function endGame(as: "won" | "lost"): Promise<void> {
     else recordLoss();
   }
 
-  // ✅ IMPORTANT: Do NOT clear random state here.
-  // Clearing here can make the UI look like it "reset" right on a win.
-  // We clear on Restart instead.
-
   if (as === "won") {
     defLoading.value = true;
     definition.value = null;
@@ -569,7 +561,6 @@ async function endGame(as: "won" | "lost"): Promise<void> {
     dbg("nyt: ended -> auto-switched mode to random");
   }
 
-  // persist finished state if random (so refresh doesn't lose the win screen)
   if (mode.value === "random") saveRandomState();
 }
 
@@ -581,6 +572,14 @@ async function submitGuess(): Promise<void> {
 
   if (g.length !== WORD_LEN) {
     showMessage("Need 5 letters.");
+    triggerShake();
+    return;
+  }
+
+  // ✅ NEW: disallow duplicate guesses (shake same as invalid word)
+  const alreadyGuessed = guesses.value.some((x) => x.toUpperCase() === g);
+  if (alreadyGuessed) {
+    showMessage("Already guessed.");
     triggerShake();
     return;
   }
@@ -671,7 +670,6 @@ async function restart(): Promise<void> {
   resetBoardState();
 
   if (mode.value === "random") {
-    // ✅ clear random word + state when starting a new random game
     clearSavedRandomWord();
     clearRandomState();
     dbg("random: restart -> cleared saved random word + random state");

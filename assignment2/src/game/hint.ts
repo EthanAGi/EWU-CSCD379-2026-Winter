@@ -11,7 +11,7 @@ export type HintInput = {
 
 // Strong openers (safe + common)
 const STARTERS = [
-  "ARISE", "SLATE", "CRANE", "ADIEU", "REACT", "STARE", "SOARE",
+  "SLATE", "CRANE", "ADIEU", "REACT", "STARE", "SOARE",
   "AUDIO", "OCEAN", "RAISE", "AISLE", "IRATE", "ROATE", "TEARS",
   "EARNS", "NEARS", "SALET", "SCARE", "CORES", "LOUIE", "ALONE",
   "ANISE", "OPERA", "URAEI", "AEONS", "ARENO", "OLEAS", "AEROS",
