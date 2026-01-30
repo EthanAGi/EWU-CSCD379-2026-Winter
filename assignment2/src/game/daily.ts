@@ -34,6 +34,47 @@ function isFiveLettersUpper(w: string): boolean {
   return w.length === WORD_LEN && /^[A-Z]{5}$/.test(w);
 }
 
+// ✅ NEW: localStorage wrapper helpers (avoid repeating try/catch everywhere)
+function lsGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function lsSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+function lsRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function lsKey(i: number): string | null {
+  try {
+    return localStorage.key(i);
+  } catch {
+    return null;
+  }
+}
+
+function lsLen(): number {
+  try {
+    return localStorage.length;
+  } catch {
+    return 0;
+  }
+}
+
 // ✅ FIX: stable "local day id" (based on local midnight), avoids stuck locks
 function localDayId(d = new Date()): number {
   const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -47,27 +88,25 @@ function nytAttemptKey(d = new Date()): string {
 
 // Optional: keep localStorage from filling up with tons of old attempt keys
 function cleanupOldAttemptKeys(keepDays = 14): void {
-  try {
-    const cutoff = localDayId(new Date()) - keepDays;
-    const toDelete: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      if (!k.startsWith(LS_NYT_ATTEMPT_PREFIX)) continue;
+  const cutoff = localDayId(new Date()) - keepDays;
+  const toDelete: string[] = [];
 
-      const suffix = k.slice(LS_NYT_ATTEMPT_PREFIX.length);
-      const id = Number(suffix);
-      if (Number.isFinite(id) && id < cutoff) toDelete.push(k);
-    }
-    toDelete.forEach((k) => localStorage.removeItem(k));
-  } catch {
-    // ignore
+  for (let i = 0; i < lsLen(); i++) {
+    const k = lsKey(i);
+    if (!k) continue;
+    if (!k.startsWith(LS_NYT_ATTEMPT_PREFIX)) continue;
+
+    const suffix = k.slice(LS_NYT_ATTEMPT_PREFIX.length);
+    const id = Number(suffix);
+    if (Number.isFinite(id) && id < cutoff) toDelete.push(k);
   }
+
+  toDelete.forEach((k) => lsRemove(k));
 }
 
 function loadCache<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = lsGet(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachePayload<T>;
     if (!parsed?.savedAt) return null;
@@ -81,7 +120,7 @@ function loadCache<T>(key: string): T | null {
 function saveCache<T>(key: string, data: T): void {
   try {
     const payload: CachePayload<T> = { savedAt: Date.now(), data };
-    localStorage.setItem(key, JSON.stringify(payload));
+    lsSet(key, JSON.stringify(payload));
   } catch {
     // ignore storage failures
   }
@@ -192,47 +231,31 @@ export function hasAttemptedNytToday(): boolean {
   cleanupOldAttemptKeys(); // safe no-op if storage blocked
 
   const key = nytAttemptKey(new Date());
-  try {
-    return localStorage.getItem(key) === "1";
-  } catch {
-    return false;
-  }
+  return lsGet(key) === "1";
 }
 
 export function markAttemptedNytToday(): void {
   cleanupOldAttemptKeys(); // safe no-op if storage blocked
 
   const key = nytAttemptKey(new Date());
-  try {
-    localStorage.setItem(key, "1");
-  } catch {
-    // ignore
-  }
+  lsSet(key, "1");
 }
 
 // ✅ reset helpers (unlock NYT)
 export function resetNytLockToday(): void {
   cleanupOldAttemptKeys(); // optional
   const key = nytAttemptKey(new Date());
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
+  lsRemove(key);
 }
 
 // Optional: wipe ALL NYT lock keys (debug nuke)
 export function resetNytLockAll(): void {
-  try {
-    const toDelete: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(LS_NYT_ATTEMPT_PREFIX)) toDelete.push(k);
-    }
-    toDelete.forEach((k) => localStorage.removeItem(k));
-  } catch {
-    // ignore
+  const toDelete: string[] = [];
+  for (let i = 0; i < lsLen(); i++) {
+    const k = lsKey(i);
+    if (k && k.startsWith(LS_NYT_ATTEMPT_PREFIX)) toDelete.push(k);
   }
+  toDelete.forEach((k) => lsRemove(k));
 }
 
 // ---------- ✅ Guess validation (NO dictionary API!) ----------
@@ -254,7 +277,7 @@ type DefOkCache = Record<string, boolean>;
 
 function loadDefTextCache(): DefTextCache {
   try {
-    const raw = localStorage.getItem(LS_DEF_TEXT_CACHE);
+    const raw = lsGet(LS_DEF_TEXT_CACHE);
     return raw ? (JSON.parse(raw) as DefTextCache) : {};
   } catch {
     return {};
@@ -263,7 +286,7 @@ function loadDefTextCache(): DefTextCache {
 
 function saveDefTextCache(cache: DefTextCache): void {
   try {
-    localStorage.setItem(LS_DEF_TEXT_CACHE, JSON.stringify(cache));
+    lsSet(LS_DEF_TEXT_CACHE, JSON.stringify(cache));
   } catch {
     // ignore
   }
@@ -271,7 +294,7 @@ function saveDefTextCache(cache: DefTextCache): void {
 
 function loadDefOkCache(): DefOkCache {
   try {
-    const raw = localStorage.getItem(LS_DEF_OK_CACHE);
+    const raw = lsGet(LS_DEF_OK_CACHE);
     return raw ? (JSON.parse(raw) as DefOkCache) : {};
   } catch {
     return {};
@@ -280,7 +303,7 @@ function loadDefOkCache(): DefOkCache {
 
 function saveDefOkCache(cache: DefOkCache): void {
   try {
-    localStorage.setItem(LS_DEF_OK_CACHE, JSON.stringify(cache));
+    lsSet(LS_DEF_OK_CACHE, JSON.stringify(cache));
   } catch {
     // ignore
   }

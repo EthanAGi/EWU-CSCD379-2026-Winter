@@ -1,6 +1,9 @@
 // src/game/word_api.ts
 const WORD_LEN = 5;
 
+// ✅ NEW: minimum wordlist size (avoid magic number "200")
+const WORDLIST_MIN = 200;
+
 // localStorage keys
 const LS_TODAY_KEY = "ewu_wordle_today_key_v2";
 const LS_TODAY_WORD = "ewu_wordle_today_word_v2";
@@ -152,12 +155,12 @@ async function fetchDatamuseWordList(): Promise<string[]> {
 
 async function ensureWordListLoaded(): Promise<string[]> {
   const existing = loadWordList();
-  if (existing.length >= 200 && wordListIsFresh()) {
+  if (existing.length >= WORDLIST_MIN && wordListIsFresh()) {
     return existing;
   }
 
   const fresh = await fetchDatamuseWordList();
-  const finalList = fresh.length >= 200 ? fresh : existing;
+  const finalList = fresh.length >= WORDLIST_MIN ? fresh : existing;
 
   if (finalList.length > 0) saveWordList(finalList);
 
