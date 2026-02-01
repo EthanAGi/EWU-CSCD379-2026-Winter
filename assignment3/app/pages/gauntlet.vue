@@ -503,6 +503,7 @@ function resetRun() {
   color:rgba(255,255,255,.92);
   cursor:pointer;
   text-decoration:none;
+  max-width: 100%;
 }
 .btn.primary{
   border:none;
@@ -535,6 +536,8 @@ function resetRun() {
   display:flex;
   gap:10px;
   align-items:center;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .pill{
@@ -597,6 +600,7 @@ function resetRun() {
   transition: transform 120ms ease;
   position: relative;
   overflow: hidden;
+  max-width: 100%;
 }
 
 .spriteImg{
@@ -606,6 +610,7 @@ function resetRun() {
   user-select:none;
   -webkit-user-drag:none;
   animation: bob 1.8s ease-in-out infinite;
+  max-width: 100%;
 }
 
 @keyframes bob{
@@ -642,6 +647,7 @@ function resetRun() {
   border: 1px solid rgba(255,255,255,.14);
   background: rgba(0,0,0,.22);
   overflow: hidden;
+  max-width: 100%;
 }
 
 .hpFill{
@@ -655,6 +661,8 @@ function resetRun() {
 .hpText{
   width: 180px;
   text-align: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Log */
@@ -672,19 +680,46 @@ function resetRun() {
   border-radius:12px;
   border:1px solid rgba(255,255,255,.10);
   background:rgba(0,0,0,.18);
+  overflow-wrap: anywhere;
 }
 
-/* Mobile */
+/* Mobile arena adjustments */
 @media (max-width: 560px){
+  .card{ padding: 14px; }
+
   .arena{
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
     justify-items: center;
     min-height: 420px;
+    padding: 12px;
   }
+
   .fighter.left, .fighter.right{
     align-items: center;
     justify-self: center;
+  }
+
+  .spriteBlock{
+    width: 118px;
+    height: 118px;
+  }
+
+  .spriteImg{
+    width: 92px;
+    height: 92px;
+  }
+
+  .hpBar, .hpText{
+    width: min(220px, 88vw);
+  }
+
+  .actions{
+    justify-content: center;
+  }
+
+  .btn{
+    width: auto;
   }
 }
 
@@ -697,19 +732,25 @@ function resetRun() {
   display: grid;
   place-items: center;
   z-index: 999;
-  padding: 18px;
+  padding: 12px;            /* smaller padding helps on tiny screens */
+  overflow: auto;           /* allow scroll if needed */
+  overscroll-behavior: contain;
 }
 
 .overlayCard{
-  width: min(520px, 92vw);
+  width: min(520px, 94vw);  /* a touch wider for tiny screens */
+  max-width: 94vw;
+  max-height: 92vh;         /* keep fully on screen */
+  overflow: auto;           /* if content ever grows */
   border-radius: 20px;
   border: 1px solid rgba(255,255,255,.14);
   background:
     radial-gradient(600px 260px at 30% 10%, rgba(124,92,255,.18), transparent 55%),
-    radial-gradient(600px 260px at 80% 35%, rgba(53,214,197,.14), transparent 55%),
+    radial-gradient(600px 260px at 80% 35%, rgba(53, 214, 197, .14), transparent 55%),
     rgba(15, 18, 30, 0.92);
   box-shadow: 0 24px 80px rgba(0,0,0,.55);
   padding: 16px;
+  box-sizing: border-box;
 }
 
 .overlayTop{ display:flex; justify-content:flex-end; }
@@ -721,6 +762,8 @@ function resetRun() {
   letter-spacing: 1px;
   border: 1px solid rgba(255,255,255,.14);
   background: rgba(255,255,255,.06);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .overlayBadge.win{ background: rgba(53,214,197,.18); }
 .overlayBadge.loss{ background: rgba(255, 70, 90, .16); }
@@ -734,10 +777,16 @@ function resetRun() {
   animation: bob 1.8s ease-in-out infinite;
   user-select:none;
   -webkit-user-drag:none;
+  max-width: 100%;
 }
 
 .overlayText{ margin-top: 8px; text-align:center; }
-.overlayHeadline{ font-size: 28px; font-weight: 1000; margin-bottom: 6px; }
+.overlayHeadline{
+  font-size: 28px;
+  font-weight: 1000;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
 
 .overlayActions{
   margin-top: 14px;
@@ -745,5 +794,32 @@ function resetRun() {
   gap: 10px;
   justify-content:center;
   flex-wrap:wrap;
+}
+
+/* Mobile overlay adjustments: prevent stretching off screen */
+@media (max-width: 420px){
+  .overlayCard{
+    width: 96vw;
+    padding: 14px;
+  }
+
+  .overlayImg{
+    width: 120px;
+    height: 120px;
+  }
+
+  .overlayHeadline{
+    font-size: 22px;
+  }
+
+  .overlayActions{
+    gap: 8px;
+  }
+
+  /* make buttons fit nicely without overflow */
+  .overlayActions .btn{
+    flex: 1 1 140px;
+    max-width: 100%;
+  }
 }
 </style>
