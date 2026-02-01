@@ -34,6 +34,139 @@ function doFeed() {
   const choice = feedChoice.value
   feedAnimal(selected.value.id, choice === 'basic' ? undefined : choice)
 }
+
+/** -------------------------
+ *  VISUAL STABLE (wandering)
+ *  ------------------------- */
+
+type SpriteState = {
+  id: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+  bobDelay: number
+}
+
+const penRef = ref<HTMLElement | null>(null)
+
+// Tune these if you want bigger/smaller animals
+const SPRITE_SIZE = 64
+const PADDING = 6
+
+const sprites = ref<SpriteState[]>([])
+
+function rand(min: number, max: number) {
+  return min + Math.random() * (max - min)
+}
+
+function spriteUrl(kind: string) {
+  // Put sprites at: /public/sprites/dog.png etc
+  return `/sprites/${kind}.png`
+}
+
+function ensureSpritesForAnimals() {
+  const animals = player.value?.animals ?? []
+  const map = new Map(sprites.value.map(s => [s.id, s]))
+
+  // Add missing
+  for (const a of animals) {
+    if (!map.has(a.id)) {
+      map.set(a.id, {
+        id: a.id,
+        x: rand(10, 200),
+        y: rand(10, 120),
+        vx: rand(-0.45, 0.45),
+        vy: rand(-0.35, 0.35),
+        bobDelay: rand(0, 1.2),
+      })
+    }
+  }
+
+  // Remove sprites for animals that no longer exist
+  const ids = new Set(animals.map(a => a.id))
+  sprites.value = Array.from(map.values()).filter(s => ids.has(s.id))
+}
+
+// Keep sprites in sync when animals change (buy new animal, etc)
+watchEffect(() => {
+  if (!import.meta.client) return
+  if (!player.value) return
+  ensureSpritesForAnimals()
+})
+
+// Movement loop
+let rafId: number | null = null
+
+function tick() {
+  const el = penRef.value
+  if (!el) {
+    rafId = requestAnimationFrame(tick)
+    return
+  }
+
+  const rect = el.getBoundingClientRect()
+  const maxX = Math.max(0, rect.width - SPRITE_SIZE - PADDING)
+  const maxY = Math.max(0, rect.height - SPRITE_SIZE - PADDING)
+
+  for (const s of sprites.value) {
+    s.x += s.vx
+    s.y += s.vy
+
+    // Soft random drift
+    s.vx += rand(-0.02, 0.02)
+    s.vy += rand(-0.02, 0.02)
+
+    // Clamp speed
+    const maxSpeed = 0.9
+    s.vx = Math.max(-maxSpeed, Math.min(maxSpeed, s.vx))
+    s.vy = Math.max(-maxSpeed, Math.min(maxSpeed, s.vy))
+
+    // Bounce walls
+    if (s.x < PADDING) {
+      s.x = PADDING
+      s.vx *= -1
+    } else if (s.x > maxX) {
+      s.x = maxX
+      s.vx *= -1
+    }
+
+    if (s.y < PADDING) {
+      s.y = PADDING
+      s.vy *= -1
+    } else if (s.y > maxY) {
+      s.y = maxY
+      s.vy *= -1
+    }
+  }
+
+  rafId = requestAnimationFrame(tick)
+}
+
+onMounted(() => {
+  if (!import.meta.client) return
+  ensureSpritesForAnimals()
+  rafId = requestAnimationFrame(tick)
+})
+
+onBeforeUnmount(() => {
+  if (rafId !== null) cancelAnimationFrame(rafId)
+})
+
+function onPenAnimalClick(animalId: string) {
+  selectedId.value = animalId
+}
+
+// Helpful for a small highlight ring on selected sprite
+function isSelectedSprite(id: string) {
+  return id === selectedId.value
+}
+
+const animalsById = computed(() => {
+  const m = new Map<string, (typeof player.value extends null ? never : any)>()
+  for (const a of player.value?.animals ?? []) m.set(a.id, a)
+  return m
+})
 </script>
 
 <template>
@@ -42,6 +175,42 @@ function doFeed() {
     <p class="muted">
       Click an animal to focus it. Pet increases affection. Feed reduces hunger and can apply items.
     </p>
+
+    <!-- VISUAL PEN -->
+    <div class="penWrap">
+      <div class="pen" ref="penRef">
+        <!-- "ground" strip -->
+        <div class="ground" />
+
+        <!-- Sprites -->
+        <button
+          v-for="s in sprites"
+          :key="s.id"
+          class="spriteBtn"
+          :class="{ selected: isSelectedSprite(s.id) }"
+          :style="{ left: s.x + 'px', top: s.y + 'px' }"
+          @click="onPenAnimalClick(s.id)"
+          type="button"
+        >
+          <div
+            class="spriteFlip"
+            :class="{ facingLeft: (s.vx < 0) }"
+          >
+            <img
+              class="spriteImg"
+              :style="{ animationDelay: s.bobDelay + 's' }"
+              :src="spriteUrl(animalsById.get(s.id)?.kind ?? 'dog')"
+              :alt="animalsById.get(s.id)?.name ?? 'animal'"
+              draggable="false"
+            />
+          </div>
+        </button>
+      </div>
+
+      <div class="penHint muted">
+        Sprites load from <code>/public/sprites/&lt;kind&gt;.png</code>. Example: <code>dog.png</code>
+      </div>
+    </div>
 
     <div class="row">
       <!-- Left: animal list -->
@@ -58,6 +227,7 @@ function doFeed() {
           class="animalBtn"
           :class="{ active: a.id === selectedId }"
           @click="selectedId = a.id"
+          type="button"
         >
           <div class="topLine">
             <span class="tag">{{ a.kind.toUpperCase() }}</span>
@@ -90,7 +260,7 @@ function doFeed() {
         </div>
 
         <div class="actions">
-          <button class="btn primary" @click="petAnimal(selected.id)">Pet</button>
+          <button class="btn primary" @click="petAnimal(selected.id)" type="button">Pet</button>
 
           <div class="feedRow">
             <select v-model="feedChoice" class="select">
@@ -100,7 +270,7 @@ function doFeed() {
               <option value="proteinBite">Protein Bite (inv: {{ player?.inventory?.proteinBite ?? 0 }})</option>
             </select>
 
-            <button class="btn" @click="doFeed">Feed</button>
+            <button class="btn" @click="doFeed" type="button">Feed</button>
           </div>
         </div>
 
@@ -130,6 +300,97 @@ function doFeed() {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* ---------- VISUAL PEN ---------- */
+.penWrap {
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+
+.pen {
+  position: relative;
+  height: 240px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(600px 260px at 30% 10%, rgba(124, 92, 255, 0.18), transparent 60%),
+    radial-gradient(600px 260px at 80% 30%, rgba(53, 214, 197, 0.14), transparent 60%),
+    rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.spriteBtn {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.spriteBtn.selected::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px;
+  border: 2px solid rgba(53, 214, 197, 0.8);
+  box-shadow: 0 0 0 6px rgba(53, 214, 197, 0.12);
+}
+
+.spriteFlip {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+}
+
+.spriteFlip.facingLeft {
+  transform: scaleX(-1);
+}
+
+/* actual image bobbing */
+.spriteImg {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: bob 1.8s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.penHint {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.18);
+}
+
+/* ---------- EXISTING LAYOUT ---------- */
 .row {
   display: flex;
   gap: 14px;
