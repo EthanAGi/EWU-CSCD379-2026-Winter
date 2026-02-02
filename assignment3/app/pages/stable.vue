@@ -3,42 +3,41 @@ import type { ItemKind } from '../types/game'
 
 const { player, petAnimal, feedAnimal } = usePlayerState()
 
-// Selected animal id
+/**
+ * NOTE on "one-of-each type":
+ * - Real enforcement should happen in usePlayerState.buyAnimal/chooseStarter.
+ * - This page assumes player.animals is already unique by kind,
+ *   but we still defensively de-dupe for display so it never breaks.
+ */
+const allAnimals = computed(() => player.value?.animals ?? [])
+const animals = computed(() => {
+  const seen = new Set<string>()
+  const out: typeof allAnimals.value = []
+  for (const a of allAnimals.value) {
+    if (seen.has(a.kind)) continue
+    seen.add(a.kind)
+    out.push(a)
+  }
+  return out
+})
+
+// Redirect if no player
+watchEffect(() => {
+  if (import.meta.client && !player.value) navigateTo('/')
+})
+
+/** ---------- Selection + “camera zoom” ---------- */
 const selectedId = ref<string | null>(null)
+const selected = computed(() => animals.value.find(a => a.id === selectedId.value) ?? null)
 
-// Selected animal object (or null)
-const selected = computed(() => {
-  return player.value?.animals.find(a => a.id === selectedId.value) ?? null
-})
+// Is the “camera zoomed in”?
+const zoomed = ref(false)
 
-// If no player exists yet, send them to onboarding (/)
-watchEffect(() => {
-  if (import.meta.client && !player.value) {
-    navigateTo('/')
-  }
-})
+// We transform this “world” layer (camera)
+const worldRef = ref<HTMLElement | null>(null)
+const penRef = ref<HTMLElement | null>(null)
 
-// Default select the first animal when animals load
-watchEffect(() => {
-  const first = player.value?.animals?.[0]
-  if (!selectedId.value && first) {
-    selectedId.value = first.id
-  }
-})
-
-// Feed dropdown selection
-const feedChoice = ref<ItemKind | 'basic'>('basic')
-
-function doFeed() {
-  if (!selected.value) return
-  const choice = feedChoice.value
-  feedAnimal(selected.value.id, choice === 'basic' ? undefined : choice)
-}
-
-/** -------------------------
- *  VISUAL STABLE (wandering)
- *  ------------------------- */
-
+// Sprite physics state
 type SpriteState = {
   id: string
   x: number
@@ -48,12 +47,8 @@ type SpriteState = {
   bobDelay: number
 }
 
-const penRef = ref<HTMLElement | null>(null)
-
-// Tune these if you want bigger/smaller animals
 const SPRITE_SIZE = 64
-const PADDING = 6
-
+const PADDING = 10
 const sprites = ref<SpriteState[]>([])
 
 function rand(min: number, max: number) {
@@ -61,21 +56,19 @@ function rand(min: number, max: number) {
 }
 
 function spriteUrl(kind: string) {
-  // Put sprites at: /public/sprites/dog.png etc
   return `/sprites/${kind}.png`
 }
 
 function ensureSpritesForAnimals() {
-  const animals = player.value?.animals ?? []
+  const list = animals.value
   const map = new Map(sprites.value.map(s => [s.id, s]))
 
-  // Add missing
-  for (const a of animals) {
+  for (const a of list) {
     if (!map.has(a.id)) {
       map.set(a.id, {
         id: a.id,
-        x: rand(10, 200),
-        y: rand(10, 120),
+        x: rand(30, 260),
+        y: rand(30, 180),
         vx: rand(-0.45, 0.45),
         vy: rand(-0.35, 0.35),
         bobDelay: rand(0, 1.2),
@@ -83,19 +76,34 @@ function ensureSpritesForAnimals() {
     }
   }
 
-  // Remove sprites for animals that no longer exist
-  const ids = new Set(animals.map(a => a.id))
+  const ids = new Set(list.map(a => a.id))
   sprites.value = Array.from(map.values()).filter(s => ids.has(s.id))
 }
 
-// Keep sprites in sync when animals change (buy new animal, etc)
+// Keep sprites synced
 watchEffect(() => {
   if (!import.meta.client) return
   if (!player.value) return
   ensureSpritesForAnimals()
 })
 
-// Movement loop
+// Auto-select first animal (so zoom works instantly)
+watchEffect(() => {
+  const first = animals.value[0]
+  if (!selectedId.value && first) selectedId.value = first.id
+})
+
+watchEffect(() => {
+  // If the selected animal disappears, clear selection and zoom
+  if (!selectedId.value) return
+  const ok = animals.value.some(a => a.id === selectedId.value)
+  if (!ok) {
+    selectedId.value = animals.value[0]?.id ?? null
+    zoomed.value = false
+  }
+})
+
+/** ---------- Movement loop ---------- */
 let rafId: number | null = null
 
 function tick() {
@@ -113,16 +121,16 @@ function tick() {
     s.x += s.vx
     s.y += s.vy
 
-    // Soft random drift
+    // Soft drift
     s.vx += rand(-0.02, 0.02)
     s.vy += rand(-0.02, 0.02)
 
-    // Clamp speed
+    // Clamp
     const maxSpeed = 0.9
     s.vx = Math.max(-maxSpeed, Math.min(maxSpeed, s.vx))
     s.vy = Math.max(-maxSpeed, Math.min(maxSpeed, s.vy))
 
-    // Bounce walls
+    // Bounce
     if (s.x < PADDING) {
       s.x = PADDING
       s.vx *= -1
@@ -153,182 +161,398 @@ onBeforeUnmount(() => {
   if (rafId !== null) cancelAnimationFrame(rafId)
 })
 
-function onPenAnimalClick(animalId: string) {
-  selectedId.value = animalId
-}
+const animalsById = computed(() => {
+  const m = new Map<string, any>()
+  for (const a of animals.value) m.set(a.id, a)
+  return m
+})
 
-// Helpful for a small highlight ring on selected sprite
 function isSelectedSprite(id: string) {
   return id === selectedId.value
 }
 
-const animalsById = computed(() => {
-  const m = new Map<string, (typeof player.value extends null ? never : any)>()
-  for (const a of player.value?.animals ?? []) m.set(a.id, a)
-  return m
+function onPenAnimalClick(animalId: string) {
+  selectedId.value = animalId
+  zoomToSelected()
+}
+
+function resetCamera() {
+  zoomed.value = false
+}
+
+function zoomToSelected() {
+  if (!selectedId.value) return
+  const pen = penRef.value
+  if (!pen) return
+  zoomed.value = true
+}
+
+/**
+ * ---------- CAMERA CLAMPING ----------
+ * We clamp the translate so the world never exposes "outside" the pen background.
+ */
+const ZOOM_SCALE = 2.0
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+const worldTransform = computed(() => {
+  const pen = penRef.value
+  const selId = selectedId.value
+  if (!pen || !selId || !zoomed.value) {
+    return 'translate3d(0px,0px,0px) scale(1)'
+  }
+
+  const rect = pen.getBoundingClientRect()
+  const s = sprites.value.find(x => x.id === selId)
+  if (!s) return 'translate3d(0px,0px,0px) scale(1)'
+
+  const scale = ZOOM_SCALE
+
+  // sprite center in world coords
+  const targetX = s.x + SPRITE_SIZE / 2
+  const targetY = s.y + SPRITE_SIZE / 2
+
+  // viewport center
+  const viewCX = rect.width / 2
+  const viewCY = rect.height / 2
+
+  // ideal translate
+  let tx = viewCX - targetX * scale
+  let ty = viewCY - targetY * scale
+
+  // clamp translate so we never move beyond edges
+  const minTx = rect.width - rect.width * scale // negative
+  const maxTx = 0
+  const minTy = rect.height - rect.height * scale
+  const maxTy = 0
+
+  tx = clamp(tx, minTx, maxTx)
+  ty = clamp(ty, minTy, maxTy)
+
+  return `translate3d(${tx}px, ${ty}px, 0px) scale(${scale})`
 })
+
+/** ---------- Pet mechanic + VFX ---------- */
+const PET_COOLDOWN_MS = 2500
+
+// Reactive time ticker for cooldown
+const nowMs = ref(Date.now())
+let nowRaf: number | null = null
+
+function startNowTicker() {
+  if (nowRaf !== null) cancelAnimationFrame(nowRaf)
+  const loop = () => {
+    nowMs.value = Date.now()
+    if (nowMs.value < petReadyAt.value) nowRaf = requestAnimationFrame(loop)
+    else nowRaf = null
+  }
+  loop()
+}
+
+onBeforeUnmount(() => {
+  if (nowRaf !== null) cancelAnimationFrame(nowRaf)
+})
+
+const petReadyAt = ref(0)
+const canPet = computed(() => nowMs.value >= petReadyAt.value)
+const petCooldownLeftMs = computed(() => Math.max(0, petReadyAt.value - nowMs.value))
+
+function formatCooldown(ms: number) {
+  const s = Math.ceil(ms / 1000)
+  return `${s}s`
+}
+
+type Heart = { id: string; x: number; y: number; driftX: number }
+const hearts = ref<Heart[]>([])
+
+function spawnHeartsForAnimal(animalId: string) {
+  const s = sprites.value.find(sp => sp.id === animalId)
+  if (!s) return
+  const baseX = s.x + SPRITE_SIZE / 2
+  const baseY = s.y - 6
+
+  const count = 8
+  const batch: Heart[] = []
+  for (let i = 0; i < count; i++) {
+    batch.push({
+      id: Math.random().toString(16).slice(2),
+      x: baseX + rand(-18, 18),
+      y: baseY + rand(-12, 12),
+      driftX: rand(-10, 10),
+    })
+  }
+
+  hearts.value.push(...batch)
+
+  window.setTimeout(() => {
+    const ids = new Set(batch.map(h => h.id))
+    hearts.value = hearts.value.filter(h => !ids.has(h.id))
+  }, 900)
+}
+
+type FloatText = {
+  id: string
+  x: number
+  y: number
+  driftX: number
+  text: string
+  kind: 'atk' | 'def'
+}
+const floatTexts = ref<FloatText[]>([])
+
+function spawnFloatText(animalId: string, kind: 'atk' | 'def', amount: number) {
+  const s = sprites.value.find(sp => sp.id === animalId)
+  if (!s) return
+
+  const baseX = s.x + SPRITE_SIZE / 2
+  const baseY = s.y - 16
+
+  const item: FloatText = {
+    id: Math.random().toString(16).slice(2),
+    x: baseX + rand(-16, 16),
+    y: baseY + rand(-10, 8),
+    driftX: rand(-10, 10),
+    text: `${kind === 'atk' ? 'ATK' : 'DEF'} +${amount}`,
+    kind,
+  }
+
+  floatTexts.value.push(item)
+  window.setTimeout(() => {
+    floatTexts.value = floatTexts.value.filter(t => t.id !== item.id)
+  }, 950)
+}
+
+/** Milestone boosts (every +5 affection) */
+function crossedMultipleOf5(before: number, after: number) {
+  return Math.floor(after / 5) > Math.floor(before / 5)
+}
+
+function applyMilestoneBoostIfNeeded(animalId: string, beforeAff: number) {
+  const a = player.value?.animals.find(x => x.id === animalId)
+  if (!a) return
+  const afterAff = a.stats.affection
+
+  if (!crossedMultipleOf5(beforeAff, afterAff)) return
+
+  const roll = Math.random() < 0.5 ? 'atk' : 'def'
+  if (roll === 'atk') {
+    a.stats.attack += 2
+    spawnFloatText(animalId, 'atk', 2)
+  } else {
+    a.stats.defense += 2
+    spawnFloatText(animalId, 'def', 2)
+  }
+}
+
+function doPet() {
+  if (!selected.value) return
+  if (!canPet.value) return
+  if (!player.value) return
+
+  const animalId = selected.value.id
+
+  // Start cooldown FIRST (anti spam)
+  petReadyAt.value = Date.now() + PET_COOLDOWN_MS
+  nowMs.value = Date.now()
+  startNowTicker()
+
+  const beforeAff = selected.value.stats.affection
+
+  petAnimal(animalId)
+  spawnHeartsForAnimal(animalId)
+  applyMilestoneBoostIfNeeded(animalId, beforeAff)
+}
+
+/** ---------- Feeding ---------- */
+const feedChoice = ref<ItemKind | 'basic'>('basic')
+
+function doFeed() {
+  if (!selected.value) return
+  const choice = feedChoice.value
+  feedAnimal(selected.value.id, choice === 'basic' ? undefined : choice)
+}
 </script>
 
 <template>
-  <section class="card">
-    <h1>Stable</h1>
-    <p class="muted">
-      Click an animal to focus it. Pet increases affection. Feed reduces hunger and can apply items.
-    </p>
-
-    <!-- VISUAL PEN -->
-    <div class="penWrap">
+  <section class="page">
+    <div class="stage">
       <div class="pen" ref="penRef">
-        <!-- "ground" strip -->
-        <div class="ground" />
+        <!-- Camera world -->
+        <div class="world" ref="worldRef" :style="{ transform: worldTransform }">
+          <div class="ground" />
 
-        <!-- Sprites -->
-        <button
-          v-for="s in sprites"
-          :key="s.id"
-          class="spriteBtn"
-          :class="{ selected: isSelectedSprite(s.id) }"
-          :style="{ left: s.x + 'px', top: s.y + 'px' }"
-          @click="onPenAnimalClick(s.id)"
-          type="button"
-        >
-          <div class="spriteFlip" :class="{ facingLeft: s.vx < 0 }">
-            <img
-              class="spriteImg"
-              :style="{ animationDelay: s.bobDelay + 's' }"
-              :src="spriteUrl(animalsById.get(s.id)?.kind ?? 'dog')"
-              :alt="animalsById.get(s.id)?.name ?? 'animal'"
-              draggable="false"
-            />
+          <!-- Floating hearts -->
+          <div class="heartsLayer" aria-hidden="true">
+            <div
+              v-for="h in hearts"
+              :key="h.id"
+              class="heart"
+              :style="{ left: h.x + 'px', top: h.y + 'px', '--drift': h.driftX + 'px' }"
+            >
+              ♥
+            </div>
           </div>
-        </button>
-      </div>
 
-      <div class="penHint muted">
-        Sprites load from <code>/public/sprites/&lt;kind&gt;.png</code>. Example: <code>dog.png</code>
-        <br />
-        Background loads from <code>/public/grass.jpg</code>.
-      </div>
-    </div>
-
-    <div class="row">
-      <!-- Left: animal list -->
-      <div class="panel">
-        <h3>Your Animals</h3>
-
-        <div v-if="(player?.animals?.length ?? 0) === 0" class="muted">
-          You don't have any animals yet. Go to the home page to pick a starter.
-        </div>
-
-        <button
-          v-for="a in player?.animals ?? []"
-          :key="a.id"
-          class="animalBtn"
-          :class="{ active: a.id === selectedId }"
-          @click="selectedId = a.id"
-          type="button"
-        >
-          <div class="topLine">
-            <span class="tag">{{ a.kind.toUpperCase() }}</span>
-            <span class="name">{{ a.name }}</span>
+          <!-- Floating stat text -->
+          <div class="floatTextLayer" aria-hidden="true">
+            <div
+              v-for="t in floatTexts"
+              :key="t.id"
+              class="floatText"
+              :class="{ atk: t.kind === 'atk', def: t.kind === 'def' }"
+              :style="{ left: t.x + 'px', top: t.y + 'px', '--drift': t.driftX + 'px' }"
+            >
+              {{ t.text }}
+            </div>
           </div>
-          <div class="small muted">
-            HP {{ a.hpCurrent }}/{{ a.stats.hpMax }} • ATK {{ a.stats.attack }} • DEF {{ a.stats.defense }}
+
+          <!-- Sprites -->
+          <button
+            v-for="s in sprites"
+            :key="s.id"
+            class="spriteBtn"
+            :class="{ selected: isSelectedSprite(s.id) }"
+            :style="{ left: s.x + 'px', top: s.y + 'px' }"
+            @click="onPenAnimalClick(s.id)"
+            type="button"
+          >
+            <div class="spriteFlip" :class="{ facingLeft: s.vx < 0 }">
+              <img
+                class="spriteImg"
+                :style="{ animationDelay: s.bobDelay + 's' }"
+                :src="spriteUrl(animalsById.get(s.id)?.kind ?? 'dog')"
+                :alt="animalsById.get(s.id)?.name ?? 'animal'"
+                draggable="false"
+              />
+            </div>
+          </button>
+        </div>
+
+        <!-- Top HUD -->
+        <div class="hud">
+          <div class="hudLeft">
+            <div class="title">Stable</div>
+            <div class="subtitle muted">Click an animal to zoom and manage it.</div>
           </div>
-        </button>
 
-        <div class="navRow">
-          <NuxtLink class="btn" to="/gauntlet">Go to Gauntlet</NuxtLink>
-          <NuxtLink class="btn" to="/shop">Go to Shop</NuxtLink>
-        </div>
-      </div>
-
-      <!-- Right: selected animal panel -->
-      <div class="panel" v-if="selected">
-        <h3>Focused Animal</h3>
-        <div class="muted">
-          {{ selected.ownerName }}’s {{ selected.kind }} • <b>{{ selected.name }}</b>
-        </div>
-
-        <div class="stats">
-          <div class="stat"><b>HP</b> {{ selected.hpCurrent }} / {{ selected.stats.hpMax }}</div>
-          <div class="stat"><b>Attack</b> {{ selected.stats.attack }}</div>
-          <div class="stat"><b>Defense</b> {{ selected.stats.defense }}</div>
-          <div class="stat"><b>Affection</b> {{ selected.stats.affection }}</div>
-          <div class="stat"><b>Hunger</b> {{ selected.stats.hunger }} (lower is better)</div>
-        </div>
-
-        <div class="actions">
-          <button class="btn primary" @click="petAnimal(selected.id)" type="button">Pet</button>
-
-          <div class="feedRow">
-            <select v-model="feedChoice" class="select">
-              <option value="basic">Basic Feed (free)</option>
-              <option value="treat">Treat (inv: {{ player?.inventory?.treat ?? 0 }})</option>
-              <option value="armorSnack">Armor Snack (inv: {{ player?.inventory?.armorSnack ?? 0 }})</option>
-              <option value="proteinBite">Protein Bite (inv: {{ player?.inventory?.proteinBite ?? 0 }})</option>
-            </select>
-
-            <button class="btn" @click="doFeed" type="button">Feed</button>
+          <div class="hudRight">
+            <NuxtLink class="hudBtn" to="/shop">Shop</NuxtLink>
+            <NuxtLink class="hudBtn" to="/gauntlet">Gauntlet</NuxtLink>
+            <button v-if="zoomed" class="hudBtn" @click="resetCamera" type="button">Reset View</button>
           </div>
         </div>
 
-        <div class="hint muted">Tip: Win fights in the Gauntlet to earn gold, then buy items/animals in the Shop.</div>
-      </div>
+        <!-- Stats Panel -->
+        <div v-if="zoomed && selected" class="panel">
+          <div class="panelTop">
+            <div class="panelTitle">
+              <span class="tag">{{ selected.kind.toUpperCase() }}</span>
+              <span class="name">{{ selected.name }}</span>
+            </div>
+            <button class="xBtn" @click="resetCamera" type="button" aria-label="Close">✕</button>
+          </div>
 
-      <div class="panel" v-else>
-        <h3>Focused Animal</h3>
-        <p class="muted">No animal selected.</p>
+          <div class="muted small">{{ selected.ownerName }}’s {{ selected.kind }}</div>
+
+          <div class="stats">
+            <div class="stat"><b>HP</b> {{ selected.hpCurrent }} / {{ selected.stats.hpMax }}</div>
+            <div class="stat"><b>ATK</b> {{ selected.stats.attack }}</div>
+            <div class="stat"><b>DEF</b> {{ selected.stats.defense }}</div>
+            <div class="stat"><b>Affection</b> {{ selected.stats.affection }} / 50</div>
+          </div>
+
+          <div class="actions">
+            <button class="btn primary" @click="doPet" type="button" :disabled="!canPet">
+              <span v-if="canPet">Pet</span>
+              <span v-else>Pet ({{ formatCooldown(petCooldownLeftMs) }})</span>
+            </button>
+
+            <div class="feedRow">
+              <select v-model="feedChoice" class="select">
+                <option value="basic">Basic Feed (free)</option>
+                <option value="treat">Treat (inv: {{ player?.inventory?.treat ?? 0 }})</option>
+                <option value="armorSnack">Armor Snack (inv: {{ player?.inventory?.armorSnack ?? 0 }})</option>
+                <option value="proteinBite">Protein Bite (inv: {{ player?.inventory?.proteinBite ?? 0 }})</option>
+              </select>
+
+              <button class="btn" @click="doFeed" type="button">Feed</button>
+            </div>
+          </div>
+
+          <div class="hint muted">
+            ✅ Centered + aligned with site layout. Camera clamped to the pen border.
+          </div>
+        </div>
+
+        <!-- Bottom hint -->
+        <div v-if="!zoomed" class="bottomHint muted">
+          No scroll. Background stays inside the centered pen.
+        </div>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  padding: 18px;
+/*
+  KEY FIX for your screenshot:
+  - DO NOT use 100vw here (it ignores your app container and causes horizontal misalignment)
+  - Instead, keep width:100% and center a max-width "stage" that matches the rest of your site.
+*/
+
+.page {
+  width: 100%;
 }
 
-.muted {
-  color: rgba(255, 255, 255, 0.7);
+/* Centers the stable area to match your app’s centered layout */
+.stage {
+  width: min(1200px, calc(100% - 32px));
+  margin: 0 auto;
 }
 
-/* ---------- VISUAL PEN ---------- */
-.penWrap {
-  margin-top: 14px;
-  margin-bottom: 12px;
-}
-
+/* The pen is the bounded "background box" */
 .pen {
   position: relative;
-  height: 240px;
+  width: 100%;
+  /* Fill most of the visible viewport WITHOUT causing scroll.
+     Adjust the 140px if your app header is taller/shorter. */
+  height: calc(100dvh - 140px);
+  min-height: 520px;
+  max-height: 780px;
+
+  overflow: hidden; /* ✅ everything stays inside border */
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
 
-  /* ✅ Grass background image (place file at /public/grass.jpg) */
   background:
-    radial-gradient(600px 260px at 30% 10%, rgba(124, 92, 255, 0.18), transparent 60%),
-    radial-gradient(600px 260px at 80% 30%, rgba(53, 214, 197, 0.14), transparent 60%),
+    radial-gradient(900px 420px at 30% 10%, rgba(124, 92, 255, 0.18), transparent 60%),
+    radial-gradient(900px 420px at 80% 30%, rgba(53, 214, 197, 0.14), transparent 60%),
     url('/grass.jpg');
-
   background-size: auto, auto, cover;
-  background-position: center, center, center;
+  background-position: center, center, center; /* ✅ centered background */
   background-repeat: no-repeat, no-repeat, no-repeat;
-
-  overflow: hidden;
 }
 
-/* Optional: subtle dark overlay so sprites pop more */
+/* subtle dark overlay */
 .pen::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.14);
+  background: rgba(0, 0, 0, 0.18);
   pointer-events: none;
+  z-index: 0;
+}
+
+/* Camera world layer */
+.world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  transition: transform 420ms cubic-bezier(.2, .9, .2, 1);
+  z-index: 1;
 }
 
 .ground {
@@ -336,12 +560,62 @@ const animalsById = computed(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 72px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
+  height: 90px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.35), transparent);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   pointer-events: none;
 }
 
+/* VFX layers */
+.heartsLayer,
+.floatTextLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.heart {
+  position: absolute;
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(255, 120, 170, 0.95);
+  text-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  animation: floatHeart 900ms ease-out forwards;
+  user-select: none;
+}
+
+@keyframes floatHeart {
+  0% { transform: translate3d(0px, 0px, 0px) scale(0.9); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translate3d(var(--drift), -44px, 0px) scale(1.2); opacity: 0; }
+}
+
+.floatText {
+  position: absolute;
+  font-size: 14px;
+  font-weight: 1000;
+  letter-spacing: 0.2px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.18);
+  backdrop-filter: blur(6px);
+  text-shadow: 0 10px 26px rgba(0,0,0,0.40);
+  animation: floatText 950ms ease-out forwards;
+  user-select: none;
+  transform: translate3d(0,0,0);
+}
+
+.floatText.atk { color: rgba(255, 70, 90, 0.98); }
+.floatText.def { color: rgba(255, 214, 80, 0.98); }
+
+@keyframes floatText {
+  0% { transform: translate3d(0px, 6px, 0px) scale(0.95); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate3d(var(--drift), -46px, 0px) scale(1.05); opacity: 0; }
+}
+
+/* Sprites */
 .spriteBtn {
   position: absolute;
   width: 64px;
@@ -350,9 +624,6 @@ const animalsById = computed(() => {
   border: none;
   background: transparent;
   cursor: pointer;
-
-  /* ensure sprites are above background/overlays */
-  z-index: 2;
 }
 
 .spriteBtn.selected::after {
@@ -360,8 +631,8 @@ const animalsById = computed(() => {
   position: absolute;
   inset: -6px;
   border-radius: 18px;
-  border: 2px solid rgba(53, 214, 197, 0.8);
-  box-shadow: 0 0 0 6px rgba(53, 214, 197, 0.12);
+  border: 2px solid rgba(53, 214, 197, 0.85);
+  box-shadow: 0 0 0 6px rgba(53, 214, 197, 0.14);
 }
 
 .spriteFlip {
@@ -371,11 +642,8 @@ const animalsById = computed(() => {
   place-items: center;
 }
 
-.spriteFlip.facingLeft {
-  transform: scaleX(-1);
-}
+.spriteFlip.facingLeft { transform: scaleX(-1); }
 
-/* actual image bobbing */
 .spriteImg {
   width: 64px;
   height: 64px;
@@ -386,66 +654,81 @@ const animalsById = computed(() => {
 }
 
 @keyframes bob {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-6px);
-  }
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
 }
 
-.penHint {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-code {
-  padding: 2px 6px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
-}
-
-/* ---------- EXISTING LAYOUT ---------- */
-.row {
+/* HUD */
+.hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
   display: flex;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.hudLeft { pointer-events: none; }
+
+.title {
+  font-weight: 1000;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.96);
+  letter-spacing: 0.3px;
+}
+
+.subtitle { margin-top: 4px; font-size: 12px; }
+
+.hudRight {
+  display: flex;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-top: 14px;
+  justify-content: flex-end;
+  pointer-events: auto;
 }
 
-.panel {
-  flex: 1 1 320px;
-  min-width: 280px;
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.animalBtn {
-  width: 100%;
-  text-align: left;
+.hudBtn {
   border-radius: 14px;
-  padding: 10px 12px;
-  margin-top: 10px;
+  padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.25);
   color: rgba(255, 255, 255, 0.92);
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
 }
 
-.animalBtn.active {
-  border: none;
-  color: #0b1020;
-  font-weight: 900;
-  background: linear-gradient(90deg, #7c5cff, #35d6c5);
+/* Panel */
+.panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: min(420px, calc(100% - 28px)); /* ✅ relative to pen, not viewport */
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 18, 30, 0.86);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  padding: 14px;
+  z-index: 4;
+  backdrop-filter: blur(8px);
 }
 
-.topLine {
+.panelTop {
   display: flex;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.panelTitle {
+  display: flex;
+  gap: 10px;
   align-items: baseline;
   flex-wrap: wrap;
 }
@@ -453,15 +736,29 @@ code {
 .tag {
   font-size: 11px;
   opacity: 0.85;
+  border: 1px solid rgba(255,255,255,0.14);
+  padding: 4px 8px;
+  border-radius: 999px;
 }
 
 .name {
-  font-weight: 900;
+  font-weight: 1000;
+  font-size: 18px;
+  color: rgba(255,255,255,0.96);
 }
 
-.small {
-  font-size: 12px;
+.xBtn {
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
 }
+
+.muted { color: rgba(255, 255, 255, 0.72); }
+.small { font-size: 12px; }
 
 .stats {
   display: flex;
@@ -474,7 +771,8 @@ code {
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
 }
 
 .actions {
@@ -489,13 +787,9 @@ code {
   border-radius: 14px;
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.92);
   cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .btn.primary {
@@ -504,6 +798,8 @@ code {
   color: #0b1020;
   font-weight: 900;
 }
+
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .feedRow {
   display: flex;
@@ -516,19 +812,22 @@ code {
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.22);
   color: rgba(255, 255, 255, 0.92);
 }
 
-.navRow {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-}
+.hint { margin-top: 12px; font-size: 12px; }
 
-.hint {
-  margin-top: 14px;
+.bottomHint {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 3;
   font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 8px 10px;
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
 }
 </style>

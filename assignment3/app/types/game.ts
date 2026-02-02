@@ -1,11 +1,21 @@
 export type AnimalKind = 'dog' | 'cat' | 'hamster' | 'fox' | 'owl' | 'boar'
-export type ItemKind = 'treat' | 'armorSnack' | 'proteinBite'
+
+export type ItemKind =
+  | 'treat'
+  | 'armorSnack'
+  | 'proteinBite'
+  // Battle items
+  | 'bandage'
+  | 'medkit'
+  | 'attackPill'
+  | 'defensePill'
+
+export type ItemCategory = 'growth' | 'battle'
 
 export type Stats = {
   attack: number
   defense: number
   affection: number
-  hunger: number
   level: number
   hpMax: number
 }
@@ -20,13 +30,26 @@ export type Animal = {
   hpCurrent: number
 }
 
+export type ItemEffect = {
+  // Growth item effects
+  attack?: number
+  defense?: number
+  affection?: number
+
+  // Battle item effects (used in Gauntlet, wears off after battle)
+  healPct?: number // 0.30 = heal 30% of hpMax, 0.70 = heal 70%
+  attackMultiplier?: number // 2 = double attack
+  defenseMultiplier?: number // 2 = double defense
+}
+
 export type Item = {
   id: string
   kind: ItemKind
+  category: ItemCategory
   name: string
   description: string
   price: number
-  effect: { attack?: number; defense?: number; affection?: number; hunger?: number }
+  effect: ItemEffect
 }
 
 export type Player = {

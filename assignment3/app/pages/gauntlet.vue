@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Animal, BattleMove, BattleState } from '../types/game'
+import type { Animal, BattleMove, BattleState, ItemKind } from '../types/game'
 
 const { player, addGold, healAnimalToFull } = usePlayerState()
 
@@ -33,7 +33,7 @@ function bossForStage(stage: 1 | 2 | 3): Animal {
       ...base,
       name: 'Bristle Badger',
       kind: 'boar',
-      stats: { attack: 6, defense: 4, affection: 0, hunger: 0, level: 1, hpMax: 28 },
+      stats: { attack: 6, defense: 4, affection: 0, level: 1, hpMax: 28 },
       hpCurrent: 28,
     }
   }
@@ -44,7 +44,7 @@ function bossForStage(stage: 1 | 2 | 3): Animal {
       ...base,
       name: 'Talons the Owl',
       kind: 'owl',
-      stats: { attack: 8, defense: 6, affection: 0, hunger: 0, level: 1, hpMax: 34 },
+      stats: { attack: 8, defense: 6, affection: 0, level: 1, hpMax: 34 },
       hpCurrent: 34,
     }
   }
@@ -54,7 +54,7 @@ function bossForStage(stage: 1 | 2 | 3): Animal {
     ...base,
     name: 'Vulpine Prime',
     kind: 'fox',
-    stats: { attack: 10, defense: 7, affection: 0, hunger: 0, level: 1, hpMax: 40 },
+    stats: { attack: 10, defense: 7, affection: 0, level: 1, hpMax: 40 },
     hpCurrent: 40,
   }
 }
@@ -75,6 +75,15 @@ const playerAnimal = computed(() => {
   return player.value.animals.find(a => a.id === battle.value!.playerAnimalId) ?? null
 })
 
+/** -------- Battle item state (wears off after each boss fight) -------- */
+const atkMult = ref(1)
+const defMult = ref(1)
+
+function resetBattleBuffs() {
+  atkMult.value = 1
+  defMult.value = 1
+}
+
 function startGauntlet() {
   if (!player.value) return
   if (!chosenId.value) return
@@ -94,8 +103,13 @@ function startGauntlet() {
     ended: false,
   }
 
+  // reset visuals + buffs
   playerHit.value = false
   enemyHit.value = false
+  playerAttacking.value = false
+  enemyAttacking.value = false
+  isAnimating.value = false
+  resetBattleBuffs()
 }
 
 function calcDamage(attackerAtk: number, defenderDef: number, defenderIsDefending: boolean): number {
@@ -142,6 +156,100 @@ onBeforeUnmount(() => {
   if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
 })
 
+/** -------- Attack lunge animation toggles --------
+ *  - If attack: add class for quick lunge forward, then return.
+ *  - If defend / item: no movement.
+ */
+const isAnimating = ref(false)
+const playerAttacking = ref(false)
+const enemyAttacking = ref(false)
+let animTimeout: number | null = null
+
+function clearAnimTimeout() {
+  if (animTimeout !== null) window.clearTimeout(animTimeout)
+  animTimeout = null
+}
+
+function playAttackAnimation(playerMove: BattleMove | 'item', enemyMove: BattleMove) {
+  playerAttacking.value = playerMove === 'attack'
+  enemyAttacking.value = enemyMove === 'attack'
+  isAnimating.value = playerAttacking.value || enemyAttacking.value
+
+  clearAnimTimeout()
+  if (isAnimating.value) {
+    animTimeout = window.setTimeout(() => {
+      playerAttacking.value = false
+      enemyAttacking.value = false
+      isAnimating.value = false
+      animTimeout = null
+    }, 260) // must match CSS animation duration
+  }
+}
+
+onBeforeUnmount(() => {
+  clearAnimTimeout()
+})
+
+/** -------- Inventory helpers (persist by leveraging addGold(0)) -------- */
+const battleItemDefs = [
+  {
+    kind: 'bandage' as ItemKind,
+    name: 'Bandage',
+    desc: 'Heals 30% HP (keeps the health).',
+  },
+  {
+    kind: 'medkit' as ItemKind,
+    name: 'Medkit',
+    desc: 'Heals 70% HP (keeps the health).',
+  },
+  {
+    kind: 'attackPill' as ItemKind,
+    name: 'Attack Boost Pill',
+    desc: 'Doubles attack for this boss fight only.',
+  },
+  {
+    kind: 'defensePill' as ItemKind,
+    name: 'Defense Pill',
+    desc: 'Doubles defense for this boss fight only.',
+  },
+] as const
+
+const usableBattleItems = computed(() => {
+  const inv = player.value?.inventory
+  if (!inv) return []
+  return battleItemDefs.filter(d => (inv[d.kind] ?? 0) > 0)
+})
+
+const selectedBattleItem = ref<ItemKind | ''>('')
+
+watchEffect(() => {
+  const list = usableBattleItems.value
+
+  if (list.length === 0) {
+    selectedBattleItem.value = ''
+    return
+  }
+
+  const stillValid = list.some(x => x.kind === selectedBattleItem.value)
+  if (!stillValid) {
+    const first = list[0]
+    if (first) selectedBattleItem.value = first.kind
+  }
+})
+
+
+function consumeItem(kind: ItemKind): boolean {
+  if (!player.value) return false
+  const have = player.value.inventory[kind] ?? 0
+  if (have <= 0) return false
+  player.value.inventory[kind] = have - 1
+
+  // Persist without changing gold:
+  // addGold always calls save() in your composable, so addGold(0) writes inventory to localStorage.
+  addGold(0)
+  return true
+}
+
 /** -------- Final result overlay helpers -------- */
 const showOverlay = computed(() => !!result.value)
 
@@ -187,6 +295,9 @@ function continueToNextStage() {
   const b = battle.value
   if (!b || !stageOverlay.value) return
 
+  // ✅ Pills wear off after the boss fight ends
+  resetBattleBuffs()
+
   // move to next stage
   const nextStage = (b.stage + 1) as 2 | 3
   b.stage = nextStage
@@ -202,6 +313,9 @@ function continueToNextStage() {
 function dropOutWithWinnings() {
   const b = battle.value
   if (!b || !playerAnimal.value) return
+
+  // ✅ run ends => buffs cleared
+  resetBattleBuffs()
 
   // Heal because run ends
   healAnimalToFull(b.playerAnimalId)
@@ -220,15 +334,60 @@ function dropOutWithWinnings() {
   b.outcome = 'win'
 }
 
-/** -------- Main turn step -------- */
+/** -------- Apply battle item effects -------- */
+function applyBattleItem(kind: ItemKind) {
+  const b = battle.value
+  const p = playerAnimal.value
+  if (!b || !p) return
+
+  // Consume first so you can't use items you don't have
+  const ok = consumeItem(kind)
+  if (!ok) {
+    b.log.unshift('No item available.')
+    return
+  }
+
+  if (kind === 'bandage') {
+    const heal = Math.ceil(p.stats.hpMax * 0.3)
+    p.hpCurrent = Math.min(p.stats.hpMax, p.hpCurrent + heal)
+    b.log.unshift(`You used a Bandage and healed ${heal} HP.`)
+    return
+  }
+
+  if (kind === 'medkit') {
+    const heal = Math.ceil(p.stats.hpMax * 0.7)
+    p.hpCurrent = Math.min(p.stats.hpMax, p.hpCurrent + heal)
+    b.log.unshift(`You used a Medkit and healed ${heal} HP.`)
+    return
+  }
+
+  if (kind === 'attackPill') {
+    atkMult.value = 2
+    b.log.unshift('You used an Attack Boost Pill. Your attack is doubled for this boss fight.')
+    return
+  }
+
+  if (kind === 'defensePill') {
+    defMult.value = 2
+    b.log.unshift('You used a Defense Pill. Your defense is doubled for this boss fight.')
+    return
+  }
+
+  // If new kinds get added later:
+  b.log.unshift('That item has no effect yet.')
+}
+
+/** -------- Main turn step (attack/defend) -------- */
 function stepTurn(playerMove: BattleMove) {
   const b = battle.value
   const p = playerAnimal.value
   if (!b || !p || b.ended) return
-  // If a stage overlay is up, we don't allow taking turns
   if (stageOverlay.value) return
+  if (isAnimating.value) return
 
   const enemyMove = enemyChooseMove(b.enemy)
+
+  playAttackAnimation(playerMove, enemyMove)
 
   b.playerDefending = playerMove === 'defend'
   b.enemyDefending = enemyMove === 'defend'
@@ -241,9 +400,10 @@ function stepTurn(playerMove: BattleMove) {
     return
   }
 
-  // Player attacks
+  // Player attacks (apply pill multiplier)
   if (playerMove === 'attack') {
-    const dmg = calcDamage(p.stats.attack, b.enemy.stats.defense, b.enemyDefending)
+    const effectiveAtk = Math.round(p.stats.attack * atkMult.value)
+    const dmg = calcDamage(effectiveAtk, b.enemy.stats.defense, b.enemyDefending)
     b.enemy.hpCurrent = Math.max(0, b.enemy.hpCurrent - dmg)
     b.log.unshift(`You hit ${b.enemy.name} for ${dmg}.`)
     flashEnemyHit()
@@ -259,6 +419,9 @@ function stepTurn(playerMove: BattleMove) {
 
     // Stage 3 => run complete
     if (b.stage === 3) {
+      // ✅ fight ends => pills wear off
+      resetBattleBuffs()
+
       healAnimalToFull(b.playerAnimalId)
       b.ended = true
       b.outcome = 'win'
@@ -266,6 +429,9 @@ function stepTurn(playerMove: BattleMove) {
       result.value = { outcome: 'win', message: `You conquered the Gauntlet! Total winnings: $${runGold.value}` }
       return
     }
+
+    // ✅ fight ends (stage 1 or 2) => pills wear off BEFORE next stage
+    resetBattleBuffs()
 
     // Stage 1 or 2 => show stage overlay with Continue/Drop Out
     stageOverlay.value = {
@@ -276,9 +442,10 @@ function stepTurn(playerMove: BattleMove) {
     return
   }
 
-  // Enemy attacks
+  // Enemy attacks (apply defense pill multiplier)
   if (enemyMove === 'attack') {
-    const dmg = calcDamage(b.enemy.stats.attack, p.stats.defense, b.playerDefending)
+    const effectiveDef = Math.round(p.stats.defense * defMult.value)
+    const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
     p.hpCurrent = Math.max(0, p.hpCurrent - dmg)
     b.log.unshift(`${b.enemy.name} hit you for ${dmg}.`)
     flashPlayerHit()
@@ -286,6 +453,60 @@ function stepTurn(playerMove: BattleMove) {
 
   // Player dead?
   if (p.hpCurrent <= 0) {
+    // ✅ fight ends => pills wear off
+    resetBattleBuffs()
+
+    healAnimalToFull(b.playerAnimalId)
+    b.ended = true
+    b.outcome = 'loss'
+    b.log.unshift('You lost the Gauntlet run.')
+    result.value = { outcome: 'loss', message: `Your animal fell in Stage ${b.stage}.` }
+    return
+  }
+
+  b.round++
+}
+
+/** -------- Turn step (use item) --------
+ * Item use consumes your turn; enemy still acts.
+ */
+function stepUseItem() {
+  const b = battle.value
+  const p = playerAnimal.value
+  if (!b || !p || b.ended) return
+  if (stageOverlay.value) return
+  if (isAnimating.value) return
+  if (!selectedBattleItem.value) return
+
+  const enemyMove = enemyChooseMove(b.enemy)
+
+  // item => player doesn't lunge; enemy might
+  playAttackAnimation('item', enemyMove)
+
+  b.playerDefending = false
+  b.enemyDefending = enemyMove === 'defend'
+
+  b.log.unshift(`Round ${b.round}: You used an item, enemy chose ${enemyMove.toUpperCase()}.`)
+
+  // Apply the item effect immediately
+  applyBattleItem(selectedBattleItem.value)
+
+  // Enemy might still attack after you use item
+  if (enemyMove === 'attack') {
+    const effectiveDef = Math.round(p.stats.defense * defMult.value)
+    const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
+    p.hpCurrent = Math.max(0, p.hpCurrent - dmg)
+    b.log.unshift(`${b.enemy.name} hit you for ${dmg}.`)
+    flashPlayerHit()
+  } else {
+    b.log.unshift(`${b.enemy.name} defended.`)
+  }
+
+  // Player dead?
+  if (p.hpCurrent <= 0) {
+    // ✅ fight ends => pills wear off
+    resetBattleBuffs()
+
     healAnimalToFull(b.playerAnimalId)
     b.ended = true
     b.outcome = 'loss'
@@ -305,13 +526,18 @@ function resetRun() {
   runGold.value = 0
   playerHit.value = false
   enemyHit.value = false
+  playerAttacking.value = false
+  enemyAttacking.value = false
+  isAnimating.value = false
+  clearAnimTimeout()
+  resetBattleBuffs()
 }
 </script>
 
 <template>
   <section class="card">
     <h1>Gauntlet</h1>
-    <p class="muted">Choose an animal and fight 3 boss battles. Each turn: Attack or Defend.</p>
+    <p class="muted">Choose an animal and fight 3 boss battles. Each turn: Attack, Defend, or Use Item.</p>
 
     <!-- Choosing screen -->
     <div v-if="choosing" class="panel">
@@ -342,8 +568,18 @@ function resetRun() {
       <div class="panel battlePanel">
         <div class="battleHeader">
           <h3>Stage {{ battle.stage }} • Round {{ battle.round }}</h3>
+
           <div class="rightHeader">
             <div class="pill muted small">Run: <b>${{ runGold }}</b></div>
+
+            <div class="pill muted small" v-if="atkMult > 1 || defMult > 1">
+              Buffs:
+              <span v-if="atkMult > 1"><b>ATK×{{ atkMult }}</b></span>
+              <span v-if="atkMult > 1 && defMult > 1"> • </span>
+              <span v-if="defMult > 1"><b>DEF×{{ defMult }}</b></span>
+              <span class="muted"> (ends after this boss)</span>
+            </div>
+
             <button class="btn" @click="resetRun" type="button">Reset</button>
           </div>
         </div>
@@ -353,8 +589,11 @@ function resetRun() {
           <div class="fighter left">
             <div class="label muted small">You</div>
 
-            <div class="spriteBlock" :class="{ hit: playerHit }">
-              <img class="spriteImg" :src="spriteUrl(playerAnimal.kind)" :alt="playerAnimal.name" draggable="false" />
+            <!-- 🚀 lunge wrapper -->
+            <div class="lungeWrap" :class="{ lungeRight: playerAttacking }">
+              <div class="spriteBlock" :class="{ hit: playerHit }">
+                <img class="spriteImg" :src="spriteUrl(playerAnimal.kind)" :alt="playerAnimal.name" draggable="false" />
+              </div>
             </div>
 
             <div class="hpBar">
@@ -372,8 +611,11 @@ function resetRun() {
           <div class="fighter right">
             <div class="label muted small">Enemy</div>
 
-            <div class="spriteBlock enemy" :class="{ hit: enemyHit }">
-              <img class="spriteImg flip" :src="spriteUrl(battle.enemy.kind)" :alt="battle.enemy.name" draggable="false" />
+            <!-- 🚀 lunge wrapper -->
+            <div class="lungeWrap" :class="{ lungeLeft: enemyAttacking }">
+              <div class="spriteBlock enemy" :class="{ hit: enemyHit }">
+                <img class="spriteImg flip" :src="spriteUrl(battle.enemy.kind)" :alt="battle.enemy.name" draggable="false" />
+              </div>
             </div>
 
             <div class="hpBar">
@@ -388,8 +630,39 @@ function resetRun() {
 
         <!-- Controls -->
         <div class="actions" v-if="!battle.ended">
-          <button class="btn primary" @click="stepTurn('attack')" type="button">Attack</button>
-          <button class="btn" @click="stepTurn('defend')" type="button">Defend</button>
+          <button class="btn primary" @click="stepTurn('attack')" type="button" :disabled="isAnimating">
+            Attack
+          </button>
+
+          <button class="btn" @click="stepTurn('defend')" type="button" :disabled="isAnimating">
+            Defend
+          </button>
+
+          <!-- ✅ Use Item (3rd option) -->
+          <div class="itemControls">
+            <select class="select" v-model="selectedBattleItem" :disabled="isAnimating || usableBattleItems.length === 0">
+              <option value="" disabled>
+                {{ usableBattleItems.length === 0 ? 'No battle items' : 'Choose battle item' }}
+              </option>
+
+              <option v-for="it in usableBattleItems" :key="it.kind" :value="it.kind">
+                {{ it.name }} (x{{ player?.inventory?.[it.kind] ?? 0 }})
+              </option>
+            </select>
+
+            <button
+              class="btn"
+              @click="stepUseItem"
+              type="button"
+              :disabled="isAnimating || !selectedBattleItem || usableBattleItems.length === 0"
+            >
+              Use Item
+            </button>
+          </div>
+        </div>
+
+        <div class="muted small itemHint" v-if="!battle.ended">
+          Bandage/Medkit keep the HP. Attack/Defense pills wear off after this boss fight ends.
         </div>
       </div>
 
@@ -513,7 +786,33 @@ function resetRun() {
 }
 .btn:disabled{ opacity:.5; cursor:not-allowed; }
 
-.actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+  align-items: center;
+}
+
+/* ✅ Item controls */
+.itemControls{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.select{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.18);
+  color:rgba(255,255,255,.92);
+}
+
+.itemHint{
+  margin-top: 10px;
+}
 
 /* -------- layout -------- */
 .battleLayout{
@@ -585,6 +884,36 @@ function resetRun() {
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,.12);
   background: rgba(255,255,255,.06);
+}
+
+/* ---------------- Attack lunge animation ----------------
+   We animate a wrapper so it doesn't fight with spriteBlock hit transform.
+*/
+.lungeWrap{
+  display: inline-block;
+  will-change: transform;
+}
+
+/* Player lunges right (toward enemy) */
+.lungeWrap.lungeRight{
+  animation: lungeRight 260ms ease-in-out;
+}
+
+/* Enemy lunges left (toward player) */
+.lungeWrap.lungeLeft{
+  animation: lungeLeft 260ms ease-in-out;
+}
+
+/* Desktop distance */
+@keyframes lungeRight{
+  0%   { transform: translateX(0); }
+  45%  { transform: translateX(46px); }
+  100% { transform: translateX(0); }
+}
+@keyframes lungeLeft{
+  0%   { transform: translateX(0); }
+  45%  { transform: translateX(-46px); }
+  100% { transform: translateX(0); }
 }
 
 /* sprite container */
@@ -718,8 +1047,16 @@ function resetRun() {
     justify-content: center;
   }
 
-  .btn{
-    width: auto;
+  /* Shorter lunge distance on mobile */
+  @keyframes lungeRight{
+    0%   { transform: translateX(0); }
+    45%  { transform: translateX(26px); }
+    100% { transform: translateX(0); }
+  }
+  @keyframes lungeLeft{
+    0%   { transform: translateX(0); }
+    45%  { transform: translateX(-26px); }
+    100% { transform: translateX(0); }
   }
 }
 
@@ -732,16 +1069,16 @@ function resetRun() {
   display: grid;
   place-items: center;
   z-index: 999;
-  padding: 12px;            /* smaller padding helps on tiny screens */
-  overflow: auto;           /* allow scroll if needed */
+  padding: 12px;
+  overflow: auto;
   overscroll-behavior: contain;
 }
 
 .overlayCard{
-  width: min(520px, 94vw);  /* a touch wider for tiny screens */
+  width: min(520px, 94vw);
   max-width: 94vw;
-  max-height: 92vh;         /* keep fully on screen */
-  overflow: auto;           /* if content ever grows */
+  max-height: 92vh;
+  overflow: auto;
   border-radius: 20px;
   border: 1px solid rgba(255,255,255,.14);
   background:
@@ -796,7 +1133,7 @@ function resetRun() {
   flex-wrap:wrap;
 }
 
-/* Mobile overlay adjustments: prevent stretching off screen */
+/* Mobile overlay adjustments */
 @media (max-width: 420px){
   .overlayCard{
     width: 96vw;
@@ -816,7 +1153,6 @@ function resetRun() {
     gap: 8px;
   }
 
-  /* make buttons fit nicely without overflow */
   .overlayActions .btn{
     flex: 1 1 140px;
     max-width: 100%;

@@ -11,14 +11,14 @@ function titleCase(s: string): string {
 }
 
 function baseStats(kind: AnimalKind): Stats {
-  if (kind === 'dog') return { attack: 5, defense: 4, affection: 3, hunger: 3, level: 1, hpMax: 30 }
-  if (kind === 'cat') return { attack: 6, defense: 3, affection: 4, hunger: 3, level: 1, hpMax: 28 }
-  if (kind === 'hamster') return { attack: 4, defense: 5, affection: 2, hunger: 3, level: 1, hpMax: 32 }
+  if (kind === 'dog') return { attack: 5, defense: 4, affection: 3, level: 1, hpMax: 30 }
+  if (kind === 'cat') return { attack: 6, defense: 3, affection: 4, level: 1, hpMax: 28 }
+  if (kind === 'hamster') return { attack: 4, defense: 5, affection: 2, level: 1, hpMax: 32 }
 
   // bought animals
-  if (kind === 'fox') return { attack: 8, defense: 5, affection: 2, hunger: 3, level: 1, hpMax: 34 }
-  if (kind === 'owl') return { attack: 7, defense: 6, affection: 2, hunger: 3, level: 1, hpMax: 36 }
-  return { attack: 6, defense: 8, affection: 1, hunger: 3, level: 1, hpMax: 40 } // boar
+  if (kind === 'fox') return { attack: 8, defense: 5, affection: 2, level: 1, hpMax: 34 }
+  if (kind === 'owl') return { attack: 7, defense: 6, affection: 2, level: 1, hpMax: 36 }
+  return { attack: 6, defense: 8, affection: 1, level: 1, hpMax: 40 } // boar
 }
 
 function makeAnimal(owner: Player, kind: AnimalKind, customName?: string): Animal {
@@ -36,29 +36,75 @@ function makeAnimal(owner: Player, kind: AnimalKind, customName?: string): Anima
 
 export function getShopItems(): Item[] {
   return [
+    // -------------------
+    // Growth Items
+    // -------------------
     {
       id: 'treat',
       kind: 'treat',
+      category: 'growth',
       name: 'Treat',
-      description: 'Small affection boost. Reduces hunger a bit.',
+      description: 'Growth item: Big affection boost.',
       price: 75,
-      effect: { affection: 2, hunger: -1 },
+      effect: { affection: 5 }, // ✅ treat gives +5 affection
     },
     {
       id: 'armorSnack',
       kind: 'armorSnack',
+      category: 'growth',
       name: 'Armor Snack',
-      description: 'Boost defense slightly.',
+      description: 'Growth item: Boost defense slightly.',
       price: 150,
-      effect: { defense: 1, hunger: -1 },
+      effect: { defense: 1 },
     },
     {
       id: 'proteinBite',
       kind: 'proteinBite',
+      category: 'growth',
       name: 'Protein Bite',
-      description: 'Boost attack slightly.',
+      description: 'Growth item: Boost attack slightly.',
       price: 150,
-      effect: { attack: 1, hunger: -1 },
+      effect: { attack: 1 },
+    },
+
+    // -------------------
+    // Battle Items
+    // -------------------
+    {
+      id: 'bandage',
+      kind: 'bandage',
+      category: 'battle',
+      name: 'Bandage',
+      description: 'Battle item: Heals 30% HP (used during battle).',
+      price: 180,
+      effect: { healPct: 0.3 },
+    },
+    {
+      id: 'medkit',
+      kind: 'medkit',
+      category: 'battle',
+      name: 'Medkit',
+      description: 'Battle item: Heals 70% HP (used during battle).',
+      price: 420,
+      effect: { healPct: 0.7 },
+    },
+    {
+      id: 'attackPill',
+      kind: 'attackPill',
+      category: 'battle',
+      name: 'Attack Boost Pill',
+      description: 'Battle item: Doubles attack until the battle ends.',
+      price: 300,
+      effect: { attackMultiplier: 2 },
+    },
+    {
+      id: 'defensePill',
+      kind: 'defensePill',
+      category: 'battle',
+      name: 'Defense Pill',
+      description: 'Battle item: Doubles defense until the battle ends.',
+      price: 300,
+      effect: { defenseMultiplier: 2 },
     },
   ]
 }
@@ -105,7 +151,16 @@ export function usePlayerState() {
       name: name.trim(),
       gold: 0,
       animals: [],
-      inventory: { treat: 0, armorSnack: 0, proteinBite: 0 },
+      // ✅ include ALL item kinds so TS + runtime are happy
+      inventory: {
+        treat: 0,
+        armorSnack: 0,
+        proteinBite: 0,
+        bandage: 0,
+        medkit: 0,
+        attackPill: 0,
+        defensePill: 0,
+      },
     }
     player.value = p
     save(p)
@@ -142,10 +197,16 @@ export function usePlayerState() {
     return true
   }
 
+  // ✅ Type limiting: only one of each animal kind
   function buyAnimal(kind: AnimalKind): boolean {
     if (!player.value) return false
+
+    const alreadyOwnsKind = player.value.animals.some(a => a.kind === kind)
+    if (alreadyOwnsKind) return false
+
     const price = getAnimalPrices()[kind]
     if (!spendGold(price)) return false
+
     player.value.animals.push(makeAnimal(player.value, kind))
     save(player.value)
     return true
@@ -155,7 +216,7 @@ export function usePlayerState() {
     if (!player.value) return
     const a = player.value.animals.find(x => x.id === animalId)
     if (!a) return
-    a.stats.affection = Math.min(30, a.stats.affection + 1)
+    a.stats.affection = Math.min(50, a.stats.affection + 1) // ✅ cap 50 (logic for +2 atk/def on thresholds can be added next)
     save(player.value)
   }
 
@@ -164,8 +225,7 @@ export function usePlayerState() {
     const a = player.value.animals.find(x => x.id === animalId)
     if (!a) return
 
-    // basic feed always reduces hunger
-    a.stats.hunger = Math.max(0, a.stats.hunger - 1)
+    // basic feed: no hunger mechanic anymore, so it does nothing unless an item is used
 
     if (itemKind) {
       const inv = player.value.inventory[itemKind] ?? 0
@@ -173,16 +233,17 @@ export function usePlayerState() {
       player.value.inventory[itemKind] = inv - 1
 
       const item = getShopItems().find(i => i.kind === itemKind)
+
+      // Only apply “growth” style stat changes here.
+      // (Battle items will be applied in gauntlet later.)
       if (item?.effect.attack) a.stats.attack += item.effect.attack
       if (item?.effect.defense) a.stats.defense += item.effect.defense
-      if (item?.effect.affection) a.stats.affection += item.effect.affection
-      if (item?.effect.hunger) a.stats.hunger = Math.max(0, a.stats.hunger + item.effect.hunger)
+      if (item?.effect.affection) a.stats.affection = Math.min(50, a.stats.affection + item.effect.affection)
     }
 
     save(player.value)
   }
 
-  // ✅ NEW: Heal one animal back to full HP (use after gauntlet)
   function healAnimalToFull(animalId: string) {
     if (!player.value) return
     const a = player.value.animals.find(x => x.id === animalId)
@@ -201,6 +262,6 @@ export function usePlayerState() {
     buyAnimal,
     petAnimal,
     feedAnimal,
-    healAnimalToFull, // ✅ export it
+    healAnimalToFull,
   }
 }
