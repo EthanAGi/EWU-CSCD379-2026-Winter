@@ -192,10 +192,7 @@ const animalsById = computed(() => {
           @click="onPenAnimalClick(s.id)"
           type="button"
         >
-          <div
-            class="spriteFlip"
-            :class="{ facingLeft: (s.vx < 0) }"
-          >
+          <div class="spriteFlip" :class="{ facingLeft: s.vx < 0 }">
             <img
               class="spriteImg"
               :style="{ animationDelay: s.bobDelay + 's' }"
@@ -209,6 +206,8 @@ const animalsById = computed(() => {
 
       <div class="penHint muted">
         Sprites load from <code>/public/sprites/&lt;kind&gt;.png</code>. Example: <code>dog.png</code>
+        <br />
+        Background loads from <code>/public/grass.jpg</code>.
       </div>
     </div>
 
@@ -222,7 +221,7 @@ const animalsById = computed(() => {
         </div>
 
         <button
-          v-for="a in (player?.animals ?? [])"
+          v-for="a in player?.animals ?? []"
           :key="a.id"
           class="animalBtn"
           :class="{ active: a.id === selectedId }"
@@ -274,9 +273,7 @@ const animalsById = computed(() => {
           </div>
         </div>
 
-        <div class="hint muted">
-          Tip: Win fights in the Gauntlet to earn gold, then buy items/animals in the Shop.
-        </div>
+        <div class="hint muted">Tip: Win fights in the Gauntlet to earn gold, then buy items/animals in the Shop.</div>
       </div>
 
       <div class="panel" v-else>
@@ -311,11 +308,27 @@ const animalsById = computed(() => {
   height: 240px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.12);
+
+  /* ✅ Grass background image (place file at /public/grass.jpg) */
   background:
     radial-gradient(600px 260px at 30% 10%, rgba(124, 92, 255, 0.18), transparent 60%),
     radial-gradient(600px 260px at 80% 30%, rgba(53, 214, 197, 0.14), transparent 60%),
-    rgba(255, 255, 255, 0.03);
+    url('/grass.jpg');
+
+  background-size: auto, auto, cover;
+  background-position: center, center, center;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+
   overflow: hidden;
+}
+
+/* Optional: subtle dark overlay so sprites pop more */
+.pen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.14);
+  pointer-events: none;
 }
 
 .ground {
@@ -326,6 +339,7 @@ const animalsById = computed(() => {
   height: 72px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.28), transparent);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  pointer-events: none;
 }
 
 .spriteBtn {
@@ -336,6 +350,9 @@ const animalsById = computed(() => {
   border: none;
   background: transparent;
   cursor: pointer;
+
+  /* ensure sprites are above background/overlays */
+  z-index: 2;
 }
 
 .spriteBtn.selected::after {
@@ -386,8 +403,8 @@ const animalsById = computed(() => {
 code {
   padding: 2px 6px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.18);
 }
 
 /* ---------- EXISTING LAYOUT ---------- */
