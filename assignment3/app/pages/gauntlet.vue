@@ -182,7 +182,7 @@ function playAttackAnimation(playerMove: BattleMove | 'item', enemyMove: BattleM
       enemyAttacking.value = false
       isAnimating.value = false
       animTimeout = null
-    }, 260) // must match CSS animation duration
+    }, 260) 
   }
 }
 
