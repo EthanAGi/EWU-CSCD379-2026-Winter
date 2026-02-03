@@ -111,9 +111,9 @@ export function getShopItems(): Item[] {
 
 export function getAnimalPrices(): Record<AnimalKind, number> {
   return {
-    dog: 0,
-    cat: 0,
-    hamster: 0,
+    dog: 500,
+    cat: 500,
+    hamster: 500,
     fox: 1200,
     owl: 1500,
     boar: 2000,
