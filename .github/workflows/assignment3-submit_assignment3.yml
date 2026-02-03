@@ -9,42 +9,29 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 20
+          cache: npm
           cache-dependency-path: assignment3/package-lock.json
 
       - name: Install dependencies
         working-directory: assignment3
         run: npm ci
 
-      - name: Build Nuxt app
+      - name: Build Nuxt
         working-directory: assignment3
         run: npm run build
 
-      # Package the built SSR output + package files so Azure can run `node .output/server/index.mjs`
-      - name: Create deployment package
-        run: |
-          mkdir -p deploy
-          cp -R assignment3/.output deploy/.output
-          cp assignment3/package.json deploy/package.json
-          cp assignment3/package-lock.json deploy/package-lock.json
-          cd deploy
-          zip -r ../app.zip .
-
-      - name: Upload artifact for deployment job
+      - name: Upload artifact (assignment3 folder)
         uses: actions/upload-artifact@v4
         with:
           name: nuxt-app
-          path: app.zip
+          path: assignment3
 
   deploy:
     runs-on: ubuntu-latest
@@ -54,10 +41,11 @@ jobs:
       contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: nuxt-app
+          path: assignment3
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -67,9 +55,8 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7B7A34467D324A8BBB54C354B8EA5080 }}
 
       - name: Deploy to Azure Web App
-        id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: "assignment3"
-          slot-name: "Production"
-          package: app.zip
+          app-name: assignment3
+          slot-name: Production
+          package: assignment3
