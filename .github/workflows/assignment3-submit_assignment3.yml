@@ -27,11 +27,15 @@ jobs:
         working-directory: assignment3
         run: npm run build
 
-      - name: Upload artifact (assignment3 folder)
+      # ✅ Upload ONLY the runtime output (prebuilt), not the whole source tree.
+      - name: Upload artifact (Nuxt runtime output)
         uses: actions/upload-artifact@v4
         with:
           name: nuxt-app
-          path: assignment3
+          path: |
+            assignment3/.output
+            assignment3/package.json
+            assignment3/package-lock.json
 
   deploy:
     runs-on: ubuntu-latest
@@ -60,3 +64,4 @@ jobs:
           app-name: assignment3
           slot-name: Production
           package: assignment3
+
