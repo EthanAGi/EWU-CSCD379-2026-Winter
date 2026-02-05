@@ -27,13 +27,18 @@ jobs:
         working-directory: assignment3
         run: npm run build
 
-      # ✅ Upload ONLY the runtime output (prebuilt), not the whole source tree.
-      - name: Upload artifact (Nuxt runtime output)
+      # ✅ Keep only production deps for runtime
+      - name: Prune dev dependencies
+        working-directory: assignment3
+        run: npm prune --omit=dev
+
+      - name: Upload artifact (prebuilt Nuxt runtime)
         uses: actions/upload-artifact@v4
         with:
           name: nuxt-app
           path: |
             assignment3/.output
+            assignment3/node_modules
             assignment3/package.json
             assignment3/package-lock.json
 
@@ -58,10 +63,21 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CA280A0C7A8A4C03A3DFD2049E5635B2 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7B7A34467D324A8BBB54C354B8EA5080 }}
 
+      # ✅ IMPORTANT: turn off Oryx build on the App Service side
+      - name: Disable build during deploy (Oryx)
+        run: |
+          az webapp config appsettings set \
+            --resource-group cscd445-a2 \
+            --name assignment3 \
+            --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
+
+      # ✅ Avoid SCM restart collision
+      - name: Wait briefly to avoid SCM restart conflicts
+        run: sleep 20
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: assignment3
           slot-name: Production
           package: assignment3
-
