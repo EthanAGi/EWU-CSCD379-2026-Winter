@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getShopItems, getAnimalPrices, usePlayerState } from '../composables/usePlayerState'
+import ShopItemCard from '~/components/ShopItemCard.vue'
 import type { AnimalKind, ItemKind } from '../types/game'
 
 const { player, buyItem, buyAnimal } = usePlayerState()
@@ -96,19 +97,15 @@ function onBuyAnimal(kind: AnimalKind) {
       <div class="panel">
         <h3>Growth Items</h3>
 
-        <div v-for="i in growthItems" :key="i.id" class="shopCard">
-          <div class="left">
-            <div class="title">{{ i.name }}</div>
-            <div class="muted small">{{ i.description }}</div>
-            <div class="muted small">Price: {{ i.price }}</div>
-            <div class="muted small" v-if="player">
-              Owned: {{ player.inventory?.[i.kind] ?? 0 }}
-            </div>
-          </div>
-
-          <button class="btn" :disabled="!player" @click="onBuyItem(i.kind)" type="button">
-            Buy
-          </button>
+        <div v-for="i in growthItems" :key="i.id">
+          <ShopItemCard
+            :itemKind="i.kind"
+            :title="i.name"
+            :description="i.description"
+            :price="i.price"
+            :ownedCount="player?.inventory?.[i.kind] ?? 0"
+            @buy="(e) => onBuyItem(e.kind as ItemKind)"
+          />
         </div>
 
         <div v-if="growthItems.length === 0" class="muted small note">
@@ -120,19 +117,15 @@ function onBuyAnimal(kind: AnimalKind) {
       <div class="panel">
         <h3>Battle Items</h3>
 
-        <div v-for="b in battleItems" :key="b.id" class="shopCard">
-          <div class="left">
-            <div class="title">{{ b.name }}</div>
-            <div class="muted small">{{ b.description }}</div>
-            <div class="muted small">Price: {{ b.price }}</div>
-            <div class="muted small" v-if="player">
-              Owned: {{ player.inventory?.[b.kind] ?? 0 }}
-            </div>
-          </div>
-
-          <button class="btn" :disabled="!player" @click="onBuyItem(b.kind)" type="button">
-            Buy
-          </button>
+        <div v-for="b in battleItems" :key="b.id">
+          <ShopItemCard
+            :itemKind="b.kind"
+            :title="b.name"
+            :description="b.description"
+            :price="b.price"
+            :ownedCount="player?.inventory?.[b.kind] ?? 0"
+            @buy="(e) => onBuyItem(e.kind as ItemKind)"
+          />
         </div>
 
         <div class="muted small note">
@@ -144,21 +137,16 @@ function onBuyAnimal(kind: AnimalKind) {
       <div class="panel">
         <h3>Animals</h3>
 
-        <div v-for="kind in animalKinds" :key="kind" class="shopCard">
-          <div class="left">
-            <div class="title">{{ kind.toUpperCase() }}</div>
-            <div class="muted small">Price: {{ animalPrices[kind] }}</div>
-            <div class="muted small" v-if="alreadyOwnsKind(kind)">Owned (limit 1)</div>
-          </div>
-
-          <button
-            class="btn"
-            :disabled="!player || alreadyOwnsKind(kind)"
-            @click="onBuyAnimal(kind)"
-            type="button"
-          >
-            {{ alreadyOwnsKind(kind) ? 'Owned' : 'Buy' }}
-          </button>
+        <div v-for="kind in animalKinds" :key="kind">
+          <ShopItemCard
+            :itemKind="kind"
+            :title="kind.toUpperCase()"
+            :description="`A ${kind} companion`"
+            :price="animalPrices[kind]"
+            :isAnimal="true"
+            :alreadyOwned="alreadyOwnsKind(kind)"
+            @buy="(e) => onBuyAnimal(e.kind as AnimalKind)"
+          />
         </div>
       </div>
     </div>
@@ -196,22 +184,6 @@ function onBuyAnimal(kind: AnimalKind) {
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.04);
 }
-
-.shopCard {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  margin-top: 10px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.05);
-}
-
-.left { min-width: 0; }
-
-.title { font-weight: 900; }
 
 .btn {
   border-radius: 14px;

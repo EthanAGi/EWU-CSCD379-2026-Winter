@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { ItemKind } from '../types/game'
+import AnimalFocusPanel from '~/components/AnimalFocusPanel.vue'
 
-const { player, petAnimal, feedAnimal } = usePlayerState()
+const { player } = usePlayerState()
 
 /**
  * NOTE on "one-of-each type":
@@ -233,146 +233,6 @@ const worldTransform = computed(() => {
 
   return `translate3d(${tx}px, ${ty}px, 0px) scale(${scale})`
 })
-
-/** ---------- Pet mechanic + VFX ---------- */
-const PET_COOLDOWN_MS = 2500
-
-// Reactive time ticker for cooldown
-const nowMs = ref(Date.now())
-let nowRaf: number | null = null
-
-function startNowTicker() {
-  if (nowRaf !== null) cancelAnimationFrame(nowRaf)
-  const loop = () => {
-    nowMs.value = Date.now()
-    if (nowMs.value < petReadyAt.value) nowRaf = requestAnimationFrame(loop)
-    else nowRaf = null
-  }
-  loop()
-}
-
-onBeforeUnmount(() => {
-  if (nowRaf !== null) cancelAnimationFrame(nowRaf)
-})
-
-const petReadyAt = ref(0)
-const canPet = computed(() => nowMs.value >= petReadyAt.value)
-const petCooldownLeftMs = computed(() => Math.max(0, petReadyAt.value - nowMs.value))
-
-function formatCooldown(ms: number) {
-  const s = Math.ceil(ms / 1000)
-  return `${s}s`
-}
-
-type Heart = { id: string; x: number; y: number; driftX: number }
-const hearts = ref<Heart[]>([])
-
-function spawnHeartsForAnimal(animalId: string) {
-  const s = sprites.value.find(sp => sp.id === animalId)
-  if (!s) return
-  const baseX = s.x + SPRITE_SIZE / 2
-  const baseY = s.y - 6
-
-  const count = 8
-  const batch: Heart[] = []
-  for (let i = 0; i < count; i++) {
-    batch.push({
-      id: Math.random().toString(16).slice(2),
-      x: baseX + rand(-18, 18),
-      y: baseY + rand(-12, 12),
-      driftX: rand(-10, 10),
-    })
-  }
-
-  hearts.value.push(...batch)
-
-  window.setTimeout(() => {
-    const ids = new Set(batch.map(h => h.id))
-    hearts.value = hearts.value.filter(h => !ids.has(h.id))
-  }, 900)
-}
-
-type FloatText = {
-  id: string
-  x: number
-  y: number
-  driftX: number
-  text: string
-  kind: 'atk' | 'def'
-}
-const floatTexts = ref<FloatText[]>([])
-
-function spawnFloatText(animalId: string, kind: 'atk' | 'def', amount: number) {
-  const s = sprites.value.find(sp => sp.id === animalId)
-  if (!s) return
-
-  const baseX = s.x + SPRITE_SIZE / 2
-  const baseY = s.y - 16
-
-  const item: FloatText = {
-    id: Math.random().toString(16).slice(2),
-    x: baseX + rand(-16, 16),
-    y: baseY + rand(-10, 8),
-    driftX: rand(-10, 10),
-    text: `${kind === 'atk' ? 'ATK' : 'DEF'} +${amount}`,
-    kind,
-  }
-
-  floatTexts.value.push(item)
-  window.setTimeout(() => {
-    floatTexts.value = floatTexts.value.filter(t => t.id !== item.id)
-  }, 950)
-}
-
-/** Milestone boosts (every +5 affection) */
-function crossedMultipleOf5(before: number, after: number) {
-  return Math.floor(after / 5) > Math.floor(before / 5)
-}
-
-function applyMilestoneBoostIfNeeded(animalId: string, beforeAff: number) {
-  const a = player.value?.animals.find(x => x.id === animalId)
-  if (!a) return
-  const afterAff = a.stats.affection
-
-  if (!crossedMultipleOf5(beforeAff, afterAff)) return
-
-  const roll = Math.random() < 0.5 ? 'atk' : 'def'
-  if (roll === 'atk') {
-    a.stats.attack += 2
-    spawnFloatText(animalId, 'atk', 2)
-  } else {
-    a.stats.defense += 2
-    spawnFloatText(animalId, 'def', 2)
-  }
-}
-
-function doPet() {
-  if (!selected.value) return
-  if (!canPet.value) return
-  if (!player.value) return
-
-  const animalId = selected.value.id
-
-  // Start cooldown FIRST (anti spam)
-  petReadyAt.value = Date.now() + PET_COOLDOWN_MS
-  nowMs.value = Date.now()
-  startNowTicker()
-
-  const beforeAff = selected.value.stats.affection
-
-  petAnimal(animalId)
-  spawnHeartsForAnimal(animalId)
-  applyMilestoneBoostIfNeeded(animalId, beforeAff)
-}
-
-/** ---------- Feeding ---------- */
-const feedChoice = ref<ItemKind | 'basic'>('basic')
-
-function doFeed() {
-  if (!selected.value) return
-  const choice = feedChoice.value
-  feedAnimal(selected.value.id, choice === 'basic' ? undefined : choice)
-}
 </script>
 
 <template>
@@ -383,51 +243,15 @@ function doFeed() {
         <div class="world" ref="worldRef" :style="{ transform: worldTransform }">
           <div class="ground" />
 
-          <!-- Floating hearts -->
-          <div class="heartsLayer" aria-hidden="true">
-            <div
-              v-for="h in hearts"
-              :key="h.id"
-              class="heart"
-              :style="{ left: h.x + 'px', top: h.y + 'px', '--drift': h.driftX + 'px' }"
-            >
-              ♥
-            </div>
-          </div>
-
-          <!-- Floating stat text -->
-          <div class="floatTextLayer" aria-hidden="true">
-            <div
-              v-for="t in floatTexts"
-              :key="t.id"
-              class="floatText"
-              :class="{ atk: t.kind === 'atk', def: t.kind === 'def' }"
-              :style="{ left: t.x + 'px', top: t.y + 'px', '--drift': t.driftX + 'px' }"
-            >
-              {{ t.text }}
-            </div>
-          </div>
-
           <!-- Sprites -->
-          <button
+          <AnimalSprite
             v-for="s in sprites"
             :key="s.id"
-            class="spriteBtn"
-            :class="{ selected: isSelectedSprite(s.id) }"
-            :style="{ left: s.x + 'px', top: s.y + 'px' }"
-            @click="onPenAnimalClick(s.id)"
-            type="button"
-          >
-            <div class="spriteFlip" :class="{ facingLeft: s.vx < 0 }">
-              <img
-                class="spriteImg"
-                :style="{ animationDelay: s.bobDelay + 's' }"
-                :src="spriteUrl(animalsById.get(s.id)?.kind ?? 'dog')"
-                :alt="animalsById.get(s.id)?.name ?? 'animal'"
-                draggable="false"
-              />
-            </div>
-          </button>
+            :sprite="s"
+            :animal="animalsById.get(s.id)!"
+            :isSelected="isSelectedSprite(s.id)"
+            @click="onPenAnimalClick"
+          />
         </div>
 
         <!-- Top HUD -->
@@ -444,49 +268,22 @@ function doFeed() {
           </div>
         </div>
 
-        <!-- Stats Panel -->
-        <div v-if="zoomed && selected" class="panel">
-          <div class="panelTop">
-            <div class="panelTitle">
-              <span class="tag">{{ selected.kind.toUpperCase() }}</span>
-              <span class="name">{{ selected.name }}</span>
-            </div>
-            <button class="xBtn" @click="resetCamera" type="button" aria-label="Close">✕</button>
-          </div>
+        <AnimalFocusPanel
+          v-if="zoomed && selected"
+          :animal="selected"
+          :player="player"
+          @close="resetCamera"
+          @pet="() => {}"
+          @feed="() => {}"
+        />
 
-          <div class="muted small">{{ selected.ownerName }}’s {{ selected.kind }}</div>
 
-          <div class="stats">
-            <div class="stat"><b>HP</b> {{ selected.hpCurrent }} / {{ selected.stats.hpMax }}</div>
-            <div class="stat"><b>ATK</b> {{ selected.stats.attack }}</div>
-            <div class="stat"><b>DEF</b> {{ selected.stats.defense }}</div>
-            <div class="stat"><b>Affection</b> {{ selected.stats.affection }} / 50</div>
-          </div>
 
-          <div class="actions">
-            <button class="btn primary" @click="doPet" type="button" :disabled="!canPet">
-              <span v-if="canPet">Pet</span>
-              <span v-else>Pet ({{ formatCooldown(petCooldownLeftMs) }})</span>
-            </button>
 
-            <div class="feedRow">
-              <select v-model="feedChoice" class="select">
-                <option value="basic">Basic Feed (free)</option>
-                <option value="treat">Treat (inv: {{ player?.inventory?.treat ?? 0 }})</option>
-                <option value="armorSnack">Armor Snack (inv: {{ player?.inventory?.armorSnack ?? 0 }})</option>
-                <option value="proteinBite">Protein Bite (inv: {{ player?.inventory?.proteinBite ?? 0 }})</option>
-              </select>
 
-              <button class="btn" @click="doFeed" type="button">Feed</button>
-            </div>
-          </div>
 
-          <div class="hint muted">
-            ✅ Centered + aligned with site layout. Camera clamped to the pen border.
-          </div>
-        </div>
 
-        <!-- Bottom hint -->
+
         <div v-if="!zoomed" class="bottomHint muted">
           No scroll. Background stays inside the centered pen.
         </div>
