@@ -34,6 +34,17 @@ const dbAnimals = ref<Animal[]>([])
 const dbLoading = ref(false)
 const dbError = ref<string | null>(null)
 
+/**
+ * ----------------------------
+ * Starter fallback (empty stable)
+ * ----------------------------
+ */
+const needsStarter = ref(false)
+const starterBusy = ref(false)
+const starterError = ref<string | null>(null)
+
+const stableIsEmpty = computed(() => !dbLoading.value && !dbError.value && dbAnimals.value.length === 0)
+
 /** Redirect if no player */
 watchEffect(() => {
   if (import.meta.client && !player.value) navigateTo('/')
@@ -81,10 +92,16 @@ async function loadAnimalsFromDb() {
     if (Array.isArray(rows)) {
       player.value.animals = mapped
     }
+
+    // ✅ If stable is empty after a successful load, show starter prompt
+    needsStarter.value = mapped.length === 0
   } catch (e: any) {
     console.error('Failed to load animals from DB:', e)
     dbError.value = e?.message ?? 'Failed to load animals from DB.'
     dbAnimals.value = player.value?.animals ?? []
+
+    // Don’t force starter if DB failed; user can retry load
+    needsStarter.value = false
   } finally {
     dbLoading.value = false
   }
@@ -93,6 +110,33 @@ async function loadAnimalsFromDb() {
 onMounted(() => {
   loadAnimalsFromDb()
 })
+
+/**
+ * Give the player a starter via a Nitro route you implement server-side.
+ * Suggested: POST /api/animals/starter
+ * Body: { playerId: string }
+ */
+async function chooseStarter() {
+  if (!player.value) return
+  starterBusy.value = true
+  starterError.value = null
+
+  try {
+    await $fetch('/api/animals/starter', {
+      method: 'POST',
+      body: { playerId: player.value.id },
+    })
+
+    // Reload from DB so the stable populates
+    await loadAnimalsFromDb()
+    needsStarter.value = false
+  } catch (e: any) {
+    console.error('Failed to grant starter:', e)
+    starterError.value = e?.message ?? 'Failed to grant starter.'
+  } finally {
+    starterBusy.value = false
+  }
+}
 
 /**
  * ----------------------------
@@ -326,6 +370,7 @@ const worldTransform = computed(() => {
             <div class="subtitle muted">Click an animal to zoom and manage it.</div>
             <div v-if="dbLoading" class="subtitle muted">Loading from DB…</div>
             <div v-else-if="dbError" class="subtitle muted">DB load failed: {{ dbError }}</div>
+            <div v-else-if="stableIsEmpty" class="subtitle muted">Your stable is empty.</div>
           </div>
 
           <div class="hudRight">
@@ -334,6 +379,30 @@ const worldTransform = computed(() => {
             <button v-if="zoomed" class="hudBtn" @click="resetCamera" type="button">
               Reset View
             </button>
+          </div>
+        </div>
+
+        <!-- Starter prompt overlay -->
+        <div v-if="needsStarter" class="starterOverlay" role="dialog" aria-modal="true">
+          <div class="starterCard">
+            <div class="starterTitle">Choose a starter</div>
+            <div class="starterText muted">
+              Your stable is empty. Let’s get you started with a companion.
+            </div>
+
+            <div v-if="starterError" class="starterText muted" style="margin-top: 8px;">
+              {{ starterError }}
+            </div>
+
+            <div class="starterActions">
+              <button class="hudBtn" type="button" :disabled="starterBusy" @click="chooseStarter">
+                {{ starterBusy ? 'Granting…' : 'Get Starter' }}
+              </button>
+
+              <button class="hudBtn" type="button" :disabled="starterBusy" @click="loadAnimalsFromDb">
+                Retry Load
+              </button>
+            </div>
           </div>
         </div>
 
@@ -455,5 +524,45 @@ const worldTransform = computed(() => {
   padding: 8px 10px;
   border-radius: 14px;
   backdrop-filter: blur(6px);
+}
+
+/* Starter overlay */
+.starterOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.starterCard {
+  width: min(520px, 100%);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  padding: 18px;
+}
+
+.starterTitle {
+  font-weight: 900;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.starterText {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.starterActions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 </style>
