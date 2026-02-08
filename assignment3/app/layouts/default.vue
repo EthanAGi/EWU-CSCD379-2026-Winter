@@ -2,6 +2,23 @@
 const route = useRoute()
 const { player } = usePlayerState()
 
+// ✅ BGM controller (persists because layout stays mounted)
+const { initOnce, setZoneFromRoute, setEnabled, enabled, currentZone, switching } = useBgm()
+
+onMounted(() => {
+  // sets up the browser “unlock audio on first click/keydown”
+  initOnce()
+})
+
+// Watch navigation and switch ONLY when route demands it (stable/gauntlet)
+watch(
+  () => route.path,
+  (p) => {
+    setZoneFromRoute(p)
+  },
+  { immediate: true }
+)
+
 // ✅ No Home link anywhere.
 // ✅ Only show game pages when a player exists (prevents weird navigation before onboarding)
 const links = computed(() => {
@@ -40,6 +57,21 @@ function onBrandClick(e: MouseEvent) {
 
       <div class="right">
         <span v-if="player" class="pill">💰 {{ gold }}</span>
+
+        <!-- ✅ Optional music toggle -->
+        <button
+          class="pill btnPill"
+          type="button"
+          @click="setEnabled(!enabled)"
+          :aria-label="enabled ? 'Mute music' : 'Unmute music'"
+          title="Music"
+        >
+          <span aria-hidden="true">{{ enabled ? '🔊' : '🔇' }}</span>
+          <span class="pillText">
+            {{ currentZone ? currentZone : 'keep' }}
+            <span v-if="switching" aria-hidden="true">…</span>
+          </span>
+        </button>
 
         <nav class="links" aria-label="Primary navigation">
           <NuxtLink
@@ -86,7 +118,19 @@ function onBrandClick(e: MouseEvent) {
   background: rgba(255,255,255,.05);
   padding:6px 10px; border-radius:999px; font-size:12px;
   color: rgba(255,255,255,.8);
+  display:inline-flex; align-items:center; gap:8px;
 }
+
+.btnPill{
+  cursor:pointer;
+}
+
+.pillText{
+  font-size:12px;
+  opacity:.85;
+  text-transform: lowercase;
+}
+
 .links{ display:flex; gap:8px; flex-wrap:wrap; }
 .link{
   text-decoration:none;
