@@ -27,9 +27,6 @@ type AnimalTemplateDto = {
   hpMax: number
 }
 
-const config = useRuntimeConfig()
-const API_BASE = ((config.public as any)?.apiBase as string | undefined)?.replace(/\/+$/, '') || 'http://localhost:5072'
-
 const templates = ref<AnimalTemplateDto[]>([])
 const templatesLoading = ref(false)
 const templatesError = ref<string | null>(null)
@@ -38,8 +35,11 @@ async function loadTemplates() {
   templatesLoading.value = true
   templatesError.value = null
   try {
-    // ✅ Use the .NET API base directly
-    templates.value = await $fetch<AnimalTemplateDto[]>(`${API_BASE}/api/animals/templates`)
+    /**
+     * ✅ IMPORTANT:
+     * Single Azure App Service (Nuxt + Nitro) -> SAME ORIGIN calls only.
+     */
+    templates.value = await $fetch<AnimalTemplateDto[]>('/api/animals/templates')
   } catch (e: any) {
     templatesError.value = e?.message ?? 'Failed to load animals from server.'
     templates.value = []
@@ -48,9 +48,7 @@ async function loadTemplates() {
   }
 }
 
-onMounted(() => {
-  loadTemplates()
-})
+onMounted(loadTemplates)
 
 /**
  * ✅ Prices still come from your existing game rules.
@@ -114,17 +112,14 @@ function onBuyItem(kind: ItemKind) {
 }
 
 /**
- * ✅ When buying an animal, do:
+ * ✅ When buying an animal:
  *  1) Local purchase
- *  2) Persist to DB via POST {API_BASE}/api/animals/claim
- *
- * IMPORTANT: If DB save fails, we ROLLBACK the local purchase
- * so the UI never claims you own an animal that isn't in the DB.
+ *  2) Persist to DB via POST /api/animals/claim (Nuxt server route)
+ *  If DB save fails, rollback local purchase.
  */
 const buyingAnimal = ref<AnimalKind | null>(null)
 
 async function onBuyAnimal(kind: AnimalKind) {
-  // only once per kind
   if (alreadyOwnsKind(kind)) {
     flash(`You already own a ${kind.toUpperCase()}. Only one of each type is allowed.`)
     return
@@ -140,15 +135,15 @@ async function onBuyAnimal(kind: AnimalKind) {
     return
   }
 
-  // If server is providing templates, ensure this kind exists in DB
+  // If server provided templates, ensure this kind exists in DB
   if (templates.value.length > 0 && !templates.value.some(t => t.kind === kind)) {
     flash(`Server doesn’t have template for ${kind}. Check your DB seed/migration.`)
     return
   }
 
-  // Snapshot state for rollback (simple + safe)
+  // Snapshot state for rollback
   const prevGold = player.value.gold
-  const prevAnimals = [...player.value.animals] // shallow copy ok (we just replace the array)
+  const prevAnimals = [...player.value.animals]
 
   // 1) Local purchase
   const ok = buyAnimal(kind)
@@ -160,7 +155,7 @@ async function onBuyAnimal(kind: AnimalKind) {
   // 2) DB write
   buyingAnimal.value = kind
   try {
-    await $fetch(`${API_BASE}/api/animals/claim`, {
+    await $fetch('/api/animals/claim', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: {
@@ -173,7 +168,7 @@ async function onBuyAnimal(kind: AnimalKind) {
 
     flash('New animal joined your stable! (Saved to DB ✅)')
   } catch (e: any) {
-    // ✅ ROLLBACK local changes if DB write fails
+    // rollback
     player.value.gold = prevGold
     player.value.animals = prevAnimals
     flash(`DB save failed — purchase rolled back: ${e?.message ?? 'unknown error'}`)
@@ -336,7 +331,6 @@ async function onBuyAnimal(kind: AnimalKind) {
   background: rgba(255,255,255,0.03);
 }
 
-/* Mobile tweaks */
 @media (max-width: 520px) {
   .card { padding: 14px; }
   .btn { width: 100%; justify-content: center; }

@@ -3,9 +3,6 @@ import type { AnimalKind } from '../types/game'
 
 const { player, createPlayer, chooseStarter, addGold } = usePlayerState()
 
-const config = useRuntimeConfig()
-const API_BASE = (config.public.apiBase as string | undefined)?.replace(/\/+$/, '') || '' // e.g. http://localhost:5072
-
 const name = ref('')
 
 const stage = computed(() => {
@@ -29,33 +26,51 @@ function titleCase(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+/** Optional UI feedback */
+const savingStarter = ref<AnimalKind | null>(null)
+const starterMsg = ref<string | null>(null)
+
 async function pickStarter(kind: AnimalKind) {
+  starterMsg.value = null
+
+  // Need player before doing anything
+  const p = player.value
+  if (!p) return
+
+  // Snapshot state for rollback if DB fails
+  const prevGold = p.gold
+  const prevAnimals = [...p.animals]
+
   // 1) local save: adds starter animal to local state
   chooseStarter(kind)
 
   // 2) give starter bonus gold
   addGold(300)
 
-  // 3) persist to API/DB as a PLAYER ANIMAL (PlayersAnimal)
-  const p = player.value
-  if (!p) return
-
+  // 3) persist to DB via Nuxt server route (same-origin)
+  savingStarter.value = kind
   try {
-    // Call the .NET API directly (avoids Nuxt router 404 / proxy confusion)
-    await $fetch(`${API_BASE}/api/animals/claim`, {
+    await $fetch(`/api/animals/claim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: {
         ownerPlayerId: p.id,
         ownerName: p.name,
         kind,
-        // "Player's animal" naming format
         name: `${p.name}'s ${titleCase(kind)}`,
       },
     })
-  } catch (e) {
-    // Don’t block the player from starting if the DB call fails
+
+    starterMsg.value = 'Starter saved to DB ✅'
+  } catch (e: any) {
+    // ✅ Roll back local state if DB save fails
+    p.gold = prevGold
+    p.animals = prevAnimals
+
+    starterMsg.value = `DB save failed — starter rollback: ${e?.message ?? 'unknown error'}`
     console.error('Failed to save starter to DB:', e)
+  } finally {
+    savingStarter.value = null
   }
 }
 </script>
@@ -91,10 +106,20 @@ async function pickStarter(kind: AnimalKind) {
       </div>
 
       <div v-else-if="stage === 'starter'" class="row">
-        <button class="btn" @click="pickStarter('dog')">Dog</button>
-        <button class="btn" @click="pickStarter('cat')">Cat</button>
-        <button class="btn" @click="pickStarter('hamster')">Hamster</button>
+        <button class="btn" :disabled="savingStarter !== null" @click="pickStarter('dog')">
+          {{ savingStarter === 'dog' ? 'Saving…' : 'Dog' }}
+        </button>
+        <button class="btn" :disabled="savingStarter !== null" @click="pickStarter('cat')">
+          {{ savingStarter === 'cat' ? 'Saving…' : 'Cat' }}
+        </button>
+        <button class="btn" :disabled="savingStarter !== null" @click="pickStarter('hamster')">
+          {{ savingStarter === 'hamster' ? 'Saving…' : 'Hamster' }}
+        </button>
       </div>
+
+      <p v-if="starterMsg" class="muted" style="margin-top:12px;">
+        {{ starterMsg }}
+      </p>
     </section>
   </section>
 </template>
@@ -149,6 +174,7 @@ async function pickStarter(kind: AnimalKind) {
   color:rgba(255,255,255,.92);
   cursor:pointer;
 }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn.primary{
   border:none;
   background:linear-gradient(90deg,#7c5cff,#35d6c5);

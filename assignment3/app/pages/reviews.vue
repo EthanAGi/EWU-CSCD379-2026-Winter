@@ -9,10 +9,13 @@ type ReviewDto = {
 
 const { player } = usePlayerState()
 
-const config = useRuntimeConfig()
-const API_BASE =
-  ((config.public as any)?.apiBase as string | undefined)?.replace(/\/+$/, '') ||
-  'http://localhost:5072'
+/**
+ * ✅ IMPORTANT:
+ * Single Azure App Service (Nuxt/Nitro) deployment.
+ * Therefore ALL client calls should use SAME-ORIGIN Nuxt server routes:
+ *   /api/...
+ * NOT http://localhost:5072 and NOT runtimeConfig apiBase.
+ */
 
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
@@ -34,7 +37,8 @@ async function loadReviews() {
   loading.value = true
   errorMsg.value = null
   try {
-    reviews.value = await $fetch<ReviewDto[]>(`${API_BASE}/api/reviews?take=50`)
+    // ✅ same-origin (Nitro route)
+    reviews.value = await $fetch<ReviewDto[]>(`/api/reviews?take=50`)
   } catch (e: any) {
     console.error(e)
     errorMsg.value = e?.message ?? 'Failed to load reviews.'
@@ -70,7 +74,8 @@ async function submitReview() {
 
   submitting.value = true
   try {
-    const created = await $fetch<ReviewDto>(`${API_BASE}/api/reviews`, {
+    // ✅ same-origin (Nitro route)
+    const created = await $fetch<ReviewDto>(`/api/reviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: { playerName: name, body, rating },

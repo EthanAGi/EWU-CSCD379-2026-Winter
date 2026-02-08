@@ -6,7 +6,7 @@ const { player } = usePlayerState()
 
 /**
  * ----------------------------
- * DB DTOs (Assignment3.Api)
+ * DB DTOs (Nitro server routes)
  * ----------------------------
  */
 type PlayerAnimalDto = {
@@ -58,11 +58,12 @@ function dtoToAnimal(a: PlayerAnimalDto): Animal {
 }
 
 /**
- * Load player animals from DB (same-origin):
+ * Load player animals from DB (same-origin Nitro route):
  * GET /api/animals/player/{playerId}
  *
- * Nuxt (Nitro) should proxy /api/** -> your backend API, so the browser never hits localhost
- * and CORS is avoided.
+ * ✅ IMPORTANT:
+ * On Azure App Service (Nuxt + Nitro), always call SAME-ORIGIN /api/... routes.
+ * The server route talks to SQL; the browser never hits localhost and CORS is avoided.
  */
 async function loadAnimalsFromDb() {
   if (!player.value) return
@@ -76,8 +77,10 @@ async function loadAnimalsFromDb() {
 
     dbAnimals.value = mapped
 
-    // Mirror into global state so other pages use DB animals
-    player.value.animals = mapped
+    // Mirror into global state ONLY if we got a valid array back
+    if (Array.isArray(rows)) {
+      player.value.animals = mapped
+    }
   } catch (e: any) {
     console.error('Failed to load animals from DB:', e)
     dbError.value = e?.message ?? 'Failed to load animals from DB.'
@@ -334,7 +337,6 @@ const worldTransform = computed(() => {
           </div>
         </div>
 
-        <!-- Panel handles its own positioning now -->
         <AnimalFocusPanel v-if="zoomed && selected" :animal="selected" :player="player" @close="resetCamera" />
 
         <div v-if="!zoomed" class="bottomHint muted">

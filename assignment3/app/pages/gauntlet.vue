@@ -4,10 +4,11 @@ import BattlePanel from '~/components/BattlePanel.vue'
 
 const { player, addGold, healAnimalToFull } = usePlayerState()
 
-// ✅ API base for the separate .NET project (Assignment3.Api)
-// nuxt.config.ts sets default to http://localhost:5072, so this should be present.
-const config = useRuntimeConfig()
-const API_BASE = (config.public.apiBase as string | undefined)?.replace(/\/+$/, '') || ''
+/**
+ * ✅ IMPORTANT:
+ * Single Azure App Service (Nuxt/Nitro).
+ * ALL client calls should hit SAME-ORIGIN Nuxt server routes: /api/...
+ */
 
 const chosenId = ref<string | null>(null)
 const choosing = computed(() => !battle.value && !result.value && !stageOverlay.value)
@@ -26,9 +27,9 @@ const stageOverlay = ref<{
 } | null>(null)
 
 /** -------------------------------------------------------
- *  Pull possible opponents from the DATABASE (separate API)
- *  - Base animals (templates)   GET {API_BASE}/api/animals/templates
- *  - Player animals (your DB)   GET {API_BASE}/api/animals/player/{playerId}
+ *  Pull possible opponents from the DATABASE (Nuxt server)
+ *  - Base animals (templates)   GET /api/animals/templates
+ *  - Player animals (your DB)   GET /api/animals/player/{playerId}
  *  ------------------------------------------------------*/
 
 type AnimalTemplateDto = {
@@ -104,9 +105,9 @@ async function loadOpponentsFromDb() {
   opponentsLoadErr.value = null
 
   try {
-    // ✅ Uses API_BASE directly (works even if Nuxt proxy is not working)
-    const templatesUrl = `${API_BASE}/api/animals/templates`
-    const playerAnimalsUrl = `${API_BASE}/api/animals/player/${encodeURIComponent(player.value.id)}`
+    // ✅ SAME-ORIGIN calls to Nitro server routes
+    const templatesUrl = `/api/animals/templates`
+    const playerAnimalsUrl = `/api/animals/player/${encodeURIComponent(player.value.id)}`
 
     const [tpls, pAnimals] = await Promise.all([
       $fetch<AnimalTemplateDto[]>(templatesUrl),
@@ -116,17 +117,15 @@ async function loadOpponentsFromDb() {
     templatesDb.value = Array.isArray(tpls) ? tpls : []
     playerAnimalsDb.value = Array.isArray(pAnimals) ? pAnimals : []
 
-    const pool: Animal[] = [
+    opponentsPool.value = [
       ...templatesDb.value.map(dtoToAnimalFromTemplate),
       ...playerAnimalsDb.value.map(dtoToAnimalFromPlayer),
     ]
 
-    opponentsPool.value = pool
     opponentsLoaded.value = true
   } catch (e: any) {
     console.error('Failed to load opponents from DB:', e)
-    opponentsLoadErr.value =
-      'Failed to load opponents from the database (API unreachable). Using local fallback enemies.'
+    opponentsLoadErr.value = 'Failed to load opponents from the database. Using local fallback enemies.'
     opponentsPool.value = []
     opponentsLoaded.value = true // prevent infinite retry spam; refresh page to retry
   }
@@ -206,7 +205,6 @@ async function startGauntlet() {
   if (!player.value) return
   if (!chosenId.value) return
 
-  // Load DB pool (safe even if it fails)
   await loadOpponentsFromDb()
 
   runGold.value = 0
@@ -257,7 +255,7 @@ function enemyChooseMove(enemy: Animal): BattleMove {
   return hpPct <= 0.35 ? 'defend' : 'attack'
 }
 
-/** Sprites + HP */
+/** Sprites */
 function spriteUrl(kind: string) {
   return `/sprites/${kind}.png`
 }
@@ -622,7 +620,7 @@ watchEffect(() => {
   <section class="card">
     <div class="topRow">
       <h1>Gauntlet</h1>
-      <div class="muted small">API: {{ API_BASE || '(not set)' }}</div>
+      <div class="muted small">API: (same-origin /api)</div>
     </div>
 
     <p class="muted">

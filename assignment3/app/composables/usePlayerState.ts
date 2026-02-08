@@ -142,9 +142,6 @@ function save(p: Player) {
 
 /* -------------------------------------------
  * Affection milestones (FIXED)
- * - Every time affection crosses 5, 10, 15, ...
- *   increase stats reliably.
- * - Handles Treat +5 crossing multiple milestones.
  * ------------------------------------------- */
 function applyAffectionMilestones(animal: Animal, beforeAff: number, afterAff: number) {
   const beforeMilestones = Math.floor(beforeAff / 5)
@@ -152,12 +149,9 @@ function applyAffectionMilestones(animal: Animal, beforeAff: number, afterAff: n
   const gained = afterMilestones - beforeMilestones
   if (gained <= 0) return
 
-  // Deterministic gains (no randomness = no “sometimes doesn’t work” bug)
   animal.stats.attack += gained
   animal.stats.defense += gained
   animal.stats.hpMax += gained * 2
-
-  // Keep current HP in a safe range; optionally “heal” by the hpMax gain.
   animal.hpCurrent = Math.min(animal.stats.hpMax, animal.hpCurrent + gained * 2)
 }
 
@@ -182,7 +176,7 @@ type PlayerAnimalDto = {
 
 function dtoToAnimal(a: PlayerAnimalDto): Animal {
   return {
-    id: `pa-${a.id}`, // stable id for linking to DB row
+    id: `pa-${a.id}`,
     ownerPlayerId: a.ownerPlayerId,
     ownerName: a.ownerName,
     name: a.name,
@@ -206,14 +200,6 @@ function animalIdToDbId(id: string): number | null {
 
 export function usePlayerState() {
   const player = useState<Player | null>('player', () => null)
-
-  // ✅ pull API base from runtimeConfig so all pages share the same config
-  const config = useRuntimeConfig()
-  const apiBase = computed(() => {
-    const raw = (config.public as any)?.apiBase as string | undefined
-    const base = (raw ?? 'http://localhost:5072').replace(/\/+$/, '')
-    return base
-  })
 
   onMounted(() => {
     if (import.meta.client && player.value === null) {
@@ -274,10 +260,8 @@ export function usePlayerState() {
     return true
   }
 
-  // ✅ Type limiting: only one of each animal kind
   function buyAnimal(kind: AnimalKind): boolean {
     if (!player.value) return false
-
     const alreadyOwnsKind = player.value.animals.some(a => a.kind === kind)
     if (alreadyOwnsKind) return false
 
@@ -307,7 +291,7 @@ export function usePlayerState() {
     if (!player.value) return
     const a = player.value.animals.find(x => x.id === animalId)
     if (!a) return
-    if (!itemKind) return // ✅ no more free/basic feed
+    if (!itemKind) return
 
     const inv = player.value.inventory[itemKind] ?? 0
     if (inv <= 0) return
@@ -315,7 +299,6 @@ export function usePlayerState() {
 
     const item = getShopItems().find(i => i.kind === itemKind)
 
-    // Only apply “growth” style stat changes here.
     if (item?.effect.attack) a.stats.attack += item.effect.attack
     if (item?.effect.defense) a.stats.defense += item.effect.defense
 
@@ -338,15 +321,11 @@ export function usePlayerState() {
   }
 
   /* -------------------------------------------
-   * ✅ DB functions (so the rest of your site can stay consistent)
-   * Pages can call these to:
-   * - load animals from DB
-   * - claim an animal in DB
-   * - update an animal row when stats change
+   * ✅ DB functions (UPDATED: same-origin /api)
    * ------------------------------------------- */
 
   async function dbLoadPlayerAnimals(playerId: string): Promise<Animal[]> {
-    const url = `${apiBase.value}/api/animals/player/${encodeURIComponent(playerId)}`
+    const url = `/api/animals/player/${encodeURIComponent(playerId)}`
     const rows = await $fetch<PlayerAnimalDto[]>(url)
     return Array.isArray(rows) ? rows.map(dtoToAnimal) : []
   }
@@ -354,8 +333,7 @@ export function usePlayerState() {
   async function dbClaimAnimal(kind: AnimalKind, customName?: string): Promise<Animal | null> {
     if (!player.value) return null
 
-    const url = `${apiBase.value}/api/animals/claim`
-    const created = await $fetch<PlayerAnimalDto>(url, {
+    const created = await $fetch<PlayerAnimalDto>(`/api/animals/claim`, {
       method: 'POST',
       body: {
         ownerPlayerId: player.value.id,
@@ -371,21 +349,18 @@ export function usePlayerState() {
 
   /**
    * IMPORTANT:
-   * You need a real endpoint to update a PlayerAnimal row.
-   * Change this route if your controller uses a different one.
-   *
-   * Example expected endpoint:
+   * This assumes you created a Nitro route:
    *   PUT /api/animals/playerAnimal/{id}
+   * i.e. file:
+   *   server/api/animals/playerAnimal/[id].put.ts
    */
   async function dbUpdatePlayerAnimal(animal: Animal): Promise<boolean> {
     const dbId = animalIdToDbId(animal.id)
     if (!dbId) return false
 
-    const url = `${apiBase.value}/api/animals/playerAnimal/${dbId}`
-    await $fetch(url, {
+    await $fetch(`/api/animals/playerAnimal/${dbId}`, {
       method: 'PUT',
       body: {
-        // Keep the body aligned with your DB row
         name: animal.name,
         kind: animal.kind,
         attack: animal.stats.attack,
@@ -414,7 +389,6 @@ export function usePlayerState() {
     healAnimalToFull,
 
     // ✅ DB helpers
-    apiBase,
     dbLoadPlayerAnimals,
     dbClaimAnimal,
     dbUpdatePlayerAnimal,
