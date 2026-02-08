@@ -4,11 +4,6 @@ import type { Animal, AnimalKind } from '../types/game'
 
 const { player } = usePlayerState()
 
-const config = useRuntimeConfig()
-const API_BASE =
-  ((config.public as any)?.apiBase as string | undefined)?.replace(/\/+$/, '') ||
-  'http://localhost:5072'
-
 /**
  * ----------------------------
  * DB DTOs (Assignment3.Api)
@@ -63,8 +58,11 @@ function dtoToAnimal(a: PlayerAnimalDto): Animal {
 }
 
 /**
- * Load player animals from DB:
- * GET {API_BASE}/api/animals/player/{playerId}
+ * Load player animals from DB (same-origin):
+ * GET /api/animals/player/{playerId}
+ *
+ * Nuxt (Nitro) should proxy /api/** -> your backend API, so the browser never hits localhost
+ * and CORS is avoided.
  */
 async function loadAnimalsFromDb() {
   if (!player.value) return
@@ -72,7 +70,7 @@ async function loadAnimalsFromDb() {
   dbError.value = null
 
   try {
-    const url = `${API_BASE}/api/animals/player/${encodeURIComponent(player.value.id)}`
+    const url = `/api/animals/player/${encodeURIComponent(player.value.id)}`
     const rows = await $fetch<PlayerAnimalDto[]>(url)
     const mapped = Array.isArray(rows) ? rows.map(dtoToAnimal) : []
 
@@ -337,12 +335,7 @@ const worldTransform = computed(() => {
         </div>
 
         <!-- Panel handles its own positioning now -->
-        <AnimalFocusPanel
-          v-if="zoomed && selected"
-          :animal="selected"
-          :player="player"
-          @close="resetCamera"
-        />
+        <AnimalFocusPanel v-if="zoomed && selected" :animal="selected" :player="player" @close="resetCamera" />
 
         <div v-if="!zoomed" class="bottomHint muted">
           No scroll. Background stays inside the centered pen.

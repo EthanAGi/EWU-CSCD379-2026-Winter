@@ -8,54 +8,41 @@ export default defineNuxtConfig({
   // Avoid shipping devtools in production
   devtools: { enabled: process.env.NODE_ENV !== 'production' },
 
-  // Runtime config allows Azure + local dev to inject environment variables
   runtimeConfig: {
-    /**
-     * Server-only values (NOT exposed to the browser).
-     * Put secrets here if you ever need them in SSR routes/server routes.
-     */
-    // apiSecret: process.env.API_SECRET,
-
     /**
      * Public values (exposed to the browser).
      *
-     * Azure App Service → Configuration → Application settings:
-     *   NUXT_PUBLIC_API_BASE = https://<your-api>.azurewebsites.net
+     * In production, you MUST set this in Azure App Service → Configuration → Application settings:
+     *   NUXT_PUBLIC_API_BASE = https://<your-backend-api-host>
      *
-     * Local development default:
+     * Local dev fallback:
      *   http://localhost:5072
      */
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072',
+
+      /**
+       * This is what your FRONTEND should use when calling the API.
+       * We want same-origin calls in production to avoid CORS:
+       *   browser -> https://assignment3.../api/...
+       *
+       * In local dev, you can still use the backend directly if you want.
+       */
+      apiClientBase:
+        process.env.NODE_ENV === 'production' ? '' : (process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072'),
     },
   },
 
   /**
-   * Azure runs behind a proxy and terminates HTTPS before forwarding to your node app.
-   * This ensures Nuxt generates correct absolute URLs.
+   * Proxy API calls through Nuxt to avoid CORS:
+   * Browser calls /api/... (same origin)
+   * Nuxt forwards to your backend at NUXT_PUBLIC_API_BASE
    */
   nitro: {
-    /**
-     * OPTIONAL BUT STRONGLY RECOMMENDED:
-     * Proxy `/api/**` requests from Nuxt → .NET API.
-     *
-     * Result:
-     *   Browser → Nuxt (3000) → .NET API (5072)
-     *
-     * This avoids CORS entirely.
-     */
     routeRules: {
       '/api/**': {
         proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072'}/api/**`,
       },
     },
-  },
-
-  /**
-   * App-level configuration
-   */
-  app: {
-    // If you later deploy under a sub-path, set baseURL here.
-    // baseURL: '/'
   },
 })
