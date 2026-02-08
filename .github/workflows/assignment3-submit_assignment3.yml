@@ -34,12 +34,10 @@ jobs:
         working-directory: assignment3
         run: npm run build
 
-      # Keep only production deps for runtime
       - name: Prune dev dependencies
         working-directory: assignment3
         run: npm prune --omit=dev
 
-      # Package a clean deploy artifact
       - name: Create deploy zip
         working-directory: assignment3
         run: |
@@ -73,23 +71,10 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_CA280A0C7A8A4C03A3DFD2049E5635B2 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7B7A34467D324A8BBB54C354B8EA5080 }}
 
-      # Turn off Oryx build on App Service (we already built in GitHub Actions)
-      - name: Disable build during deploy (Oryx)
-        run: |
-          az webapp config appsettings set \
-            --resource-group cscd445-a2 \
-            --name assignment3 \
-            --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false WEBSITE_RUN_FROM_PACKAGE=1
-
       - name: Deploy to Azure Web App (ZIP)
         uses: azure/webapps-deploy@v3
         with:
           app-name: assignment3
           slot-name: Production
           package: assignment3/nuxt-app.zip
-          # Critical for Nuxt on Linux App Service:
           startup-command: "node .output/server/index.mjs"
-
-      - name: Restart web app (ensure new package is live)
-        run: |
-          az webapp restart --resource-group cscd445-a2 --name assignment3
