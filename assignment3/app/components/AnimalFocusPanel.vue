@@ -93,23 +93,18 @@ function spawnFloat(kind: 'atk' | 'def', amount: number) {
 }
 
 /* ------------------------------
- * Affection milestone logic
- * - when crossing 5,10,15,... give boosts
+ * Affection milestone detection (VFX only)
+ * IMPORTANT:
+ * Milestone stat changes are handled in usePlayerState().
+ * This function ONLY detects milestone crossings to play float text.
  * ------------------------------ */
-function applyAffectionMilestones(before: number, after: number) {
+function vfxForAffectionMilestones(before: number, after: number) {
   const beforeMilestones = Math.floor(before / 5)
   const afterMilestones = Math.floor(after / 5)
   const gained = afterMilestones - beforeMilestones
   if (gained <= 0) return
 
-  props.animal.stats.attack += gained
-  props.animal.stats.defense += gained
-  props.animal.stats.hpMax += gained * 2
-  props.animal.hpCurrent = Math.min(
-    props.animal.stats.hpMax,
-    props.animal.hpCurrent + gained * 2
-  )
-
+  // Each milestone gives +1 atk/+1 def/+2 hpMax in the composable.
   spawnFloat('atk', gained)
   spawnFloat('def', gained)
 }
@@ -120,7 +115,7 @@ function applyAffectionMilestones(before: number, after: number) {
 type GrowthKind = 'treat' | 'armorSnack' | 'proteinBite'
 const growthOptions = [
   { label: 'None', value: '' },
-  { label: 'Treat (+2 AFF)', value: 'treat' },
+  { label: 'Treat (+5 AFF)', value: 'treat' },          // ✅ matches composable/shop data
   { label: 'Armor Snack (+DEF)', value: 'armorSnack' },
   { label: 'Protein Bite (+ATK)', value: 'proteinBite' },
 ] as const
@@ -139,7 +134,6 @@ const canUseSelected = computed(() => {
 
 /* ------------------------------
  * FOLLOW PANEL (camera/overlay)
- * Panel follows selected animal, clamps to pen edges.
  * ------------------------------ */
 const panelRef = ref<HTMLElement | null>(null)
 const xPx = ref(0)
@@ -152,13 +146,11 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function findPenEl(): HTMLElement | null {
-  // Stable page should have <div class="pen"> as container
   const root = panelRef.value?.parentElement
   return (root?.closest?.('.pen') as HTMLElement | null) ?? null
 }
 
 function findSelectedSpriteEl(): HTMLElement | null {
-  // Selected sprite has .spriteBtn.selected on the button
   const pen = findPenEl()
   if (!pen) return null
   return pen.querySelector('.spriteBtn.selected') as HTMLElement | null
@@ -173,14 +165,12 @@ function setPanelToFollow() {
   const penRect = pen.getBoundingClientRect()
   const spRect = spriteEl.getBoundingClientRect()
 
-  // anchor: to the right of sprite, vertically aligned to its top
   const desiredLeft = spRect.right - penRect.left + 12
   const desiredTop = spRect.top - penRect.top - 6
 
   const panelW = panelEl.offsetWidth || 360
   const panelH = panelEl.offsetHeight || 220
 
-  // clamp to pen bounds (freeze at edge)
   const minLeft = 12
   const minTop = 12
   const maxLeft = Math.max(minLeft, penRect.width - panelW - 12)
@@ -219,7 +209,6 @@ onMounted(() => {
     resizeBound = true
   }
 
-  // initial position after render
   nextTick(() => setPanelToFollow())
 })
 
@@ -237,9 +226,6 @@ watch(
 
 /* ------------------------------
  * Actions
- * IMPORTANT:
- * - do NOT manually change affection here (state should update in composable)
- * - compute before/after then apply milestone boosts locally
  * ------------------------------ */
 function doPet() {
   if (!props.player) return
@@ -251,11 +237,11 @@ function doPet() {
   nowMs.value = Date.now()
   startNowTicker()
 
-  // should modify animal in state
+  // ✅ composable updates affection + milestone stats
   petAnimal(props.animal.id)
 
   const afterAff = props.animal.stats.affection
-  applyAffectionMilestones(beforeAff, afterAff)
+  vfxForAffectionMilestones(beforeAff, afterAff)
 
   spawnHearts()
   emit('pet', props.animal.id)
@@ -269,10 +255,11 @@ function doUseGrowth() {
 
   const beforeAff = props.animal.stats.affection
 
+  // ✅ composable applies growth effects + milestone stats
   feedAnimal(props.animal.id, kind as unknown as ItemKind)
 
   const afterAff = props.animal.stats.affection
-  applyAffectionMilestones(beforeAff, afterAff)
+  vfxForAffectionMilestones(beforeAff, afterAff)
 
   spawnHearts()
   emit('feed', props.animal.id, kind as unknown as ItemKind)

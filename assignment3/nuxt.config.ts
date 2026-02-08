@@ -2,7 +2,7 @@
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
 
-  // We are deploying as a Node server (Azure App Service), not static.
+  // Azure App Service runs a Node server (not static hosting)
   ssr: true,
 
   // Avoid shipping devtools in production
@@ -10,39 +10,28 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     /**
-     * Public values (exposed to the browser).
-     *
-     * In production, you MUST set this in Azure App Service → Configuration → Application settings:
-     *   NUXT_PUBLIC_API_BASE = https://<your-backend-api-host>
-     *
-     * Local dev fallback:
-     *   http://localhost:5072
+     * Private values (server-only) could go here if needed
+     * (ex: DB connection string). Do NOT put secrets in public.
      */
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072',
-
       /**
-       * This is what your FRONTEND should use when calling the API.
-       * We want same-origin calls in production to avoid CORS:
-       *   browser -> https://assignment3.../api/...
-       *
-       * In local dev, you can still use the backend directly if you want.
+       * Keep this only if you still use it somewhere (e.g. for non-/api calls).
+       * Your browser code should prefer SAME-ORIGIN calls like:
+       *   $fetch('/api/...')
        */
-      apiClientBase:
-        process.env.NODE_ENV === 'production' ? '' : (process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072'),
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
     },
   },
 
   /**
-   * Proxy API calls through Nuxt to avoid CORS:
-   * Browser calls /api/... (same origin)
-   * Nuxt forwards to your backend at NUXT_PUBLIC_API_BASE
+   * ✅ IMPORTANT:
+   * Do NOT proxy /api/** if you are using Nuxt server routes in server/api/**.
+   * If you proxy /api/**, Nitro never runs your server/api handlers and you get 502.
    */
   nitro: {
+    preset: 'node-server',
     routeRules: {
-      '/api/**': {
-        proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072'}/api/**`,
-      },
+      // leave empty (or put non-/api rules here)
     },
   },
 })
