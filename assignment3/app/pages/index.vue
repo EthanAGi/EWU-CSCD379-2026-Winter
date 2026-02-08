@@ -61,32 +61,98 @@ async function pickStarter(kind: AnimalKind) {
 </script>
 
 <template>
-  <section class="card">
-    <h1 v-if="stage === 'name'">Welcome</h1>
-    <h1 v-else-if="stage === 'starter'">Choose Your Starter</h1>
+  <section class="wrap">
+    <!-- ✅ Simple nav (NO Home link ever) -->
+    <nav class="nav">
+      <NuxtLink class="navBtn" to="/reviews">Reviews</NuxtLink>
 
-    <p class="muted" v-if="stage === 'name'">
-      Enter your name to begin. (Saved locally for now.)
-    </p>
+      <template v-if="player">
+        <NuxtLink class="navBtn" to="/stable">Stable</NuxtLink>
+        <NuxtLink class="navBtn" to="/shop">Shop</NuxtLink>
+      </template>
+    </nav>
 
-    <div v-if="stage === 'name'" class="row">
-      <input class="input" v-model="name" placeholder="Player name..." @keydown.enter="submitName" />
-      <button class="btn primary" @click="submitName">Continue</button>
-    </div>
+    <section class="card">
+      <h1 v-if="stage === 'name'">Welcome</h1>
+      <h1 v-else-if="stage === 'starter'">Choose Your Starter</h1>
 
-    <div v-else-if="stage === 'starter'" class="row">
-      <button class="btn" @click="pickStarter('dog')">Dog</button>
-      <button class="btn" @click="pickStarter('cat')">Cat</button>
-      <button class="btn" @click="pickStarter('hamster')">Hamster</button>
-    </div>
+      <p class="muted" v-if="stage === 'name'">
+        Enter your name to begin. (Saved locally for now.)
+      </p>
+
+      <div v-if="stage === 'name'" class="row">
+        <input
+          class="input"
+          v-model="name"
+          placeholder="Player name..."
+          @keydown.enter="submitName"
+        />
+        <button class="btn primary" @click="submitName">Continue</button>
+      </div>
+
+      <div v-else-if="stage === 'starter'" class="row">
+        <button class="btn" @click="pickStarter('dog')">Dog</button>
+        <button class="btn" @click="pickStarter('cat')">Cat</button>
+        <button class="btn" @click="pickStarter('hamster')">Hamster</button>
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.card{ border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(255,255,255,.06); box-shadow:0 12px 40px rgba(0,0,0,.35); padding:18px; margin-top:20px;}
+.wrap { width: min(900px, calc(100% - 32px)); margin: 0 auto; margin-top: 18px; }
+
+.nav{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin-bottom:14px;
+}
+
+.navBtn{
+  border-radius:14px;
+  padding:10px 14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.22);
+  color:rgba(255,255,255,.92);
+  text-decoration:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  backdrop-filter: blur(6px);
+}
+
+.card{
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;
+  background:rgba(255,255,255,.06);
+  box-shadow:0 12px 40px rgba(0,0,0,.35);
+  padding:18px;
+}
+
 .muted{ color:rgba(255,255,255,.70); }
-.row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:14px;}
-.input{ flex:1 1 240px; padding:10px 12px; border-radius:14px; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.18); color:rgba(255,255,255,.92); }
-.btn{ border-radius:14px; padding:10px 14px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06); color:rgba(255,255,255,.92); cursor:pointer; }
-.btn.primary{ border:none; background:linear-gradient(90deg,#7c5cff,#35d6c5); color:#0b1020; font-weight:900; }
+.row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+.input{
+  flex:1 1 240px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.18);
+  color:rgba(255,255,255,.92);
+}
+.btn{
+  border-radius:14px;
+  padding:10px 14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.92);
+  cursor:pointer;
+}
+.btn.primary{
+  border:none;
+  background:linear-gradient(90deg,#7c5cff,#35d6c5);
+  color:#0b1020;
+  font-weight:900;
+}
 </style>

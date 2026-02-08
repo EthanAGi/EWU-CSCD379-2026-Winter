@@ -7,9 +7,12 @@ public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    // ✅ Replace Scores with these two tables:
+    // Existing tables
     public DbSet<AnimalTemplate> AnimalTemplates => Set<AnimalTemplate>();
     public DbSet<PlayerAnimal> PlayerAnimals => Set<PlayerAnimal>();
+
+    // ✅ NEW: Reviews table
+    public DbSet<Review> Reviews => Set<Review>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -19,6 +22,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<AnimalTemplate>()
             .HasIndex(t => t.Kind)
             .IsUnique();
+
+        // ✅ Optional: Helpful index for "latest reviews" queries
+        modelBuilder.Entity<Review>()
+            .HasIndex(r => r.CreatedAtUtc);
 
         // ✅ Seed one base version of every animal (matches your baseStats() in TS)
         modelBuilder.Entity<AnimalTemplate>().HasData(

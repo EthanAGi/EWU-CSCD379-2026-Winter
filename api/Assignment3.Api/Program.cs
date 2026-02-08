@@ -1,4 +1,5 @@
 using Assignment3.Api.Data;
+using Assignment3.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -6,28 +7,34 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 
-// ✅ CORS (allow Nuxt dev server to call this API on localhost)
+// ✅ CORS (Nuxt local + Azure deployed site)
 var corsPolicyName = "NuxtDev";
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(corsPolicyName, policy =>
     {
         policy
-            .WithOrigins("http://localhost:3000")
+            .WithOrigins(
+                "http://localhost:3000",
+                "https://assignment3-b6dfeygfb0bgfgbr.eastus2-01.azurewebsites.net"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod();
 
-        // If you ever use cookies/auth between Nuxt and API, use this instead:
-        // policy.WithOrigins("http://localhost:3000")
-        //       .AllowAnyHeader()
-        //       .AllowAnyMethod()
-        //       .AllowCredentials();
+        // If you ever switch to cookies/auth, use:
+        // .AllowCredentials();
     });
 });
 
-// Entity Framework + SQL Server
+// ✅ Register business logic services
+builder.Services.AddScoped<IReviewService, ReviewService>();
+
+// ✅ Entity Framework + SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")
+    )
+);
 
 // Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
@@ -35,7 +42,7 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// ✅ TEMP: Definitive DB connectivity test (prints to Log Stream on startup)
+// ✅ TEMP: Definitive DB connectivity test (safe for Azure logs)
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -48,7 +55,7 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine("❌ DATABASE CONNECTION FAILED");
-        Console.WriteLine(ex.ToString()); // full details for Azure Log Stream
+        Console.WriteLine(ex.ToString());
     }
 }
 
@@ -61,10 +68,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// ✅ Enable CORS (must be before MapControllers; before auth/authorization if you add them later)
+// ✅ Enable CORS (must be BEFORE MapControllers)
 app.UseCors(corsPolicyName);
 
-// Map attribute-routed controllers (e.g., /api/scores)
+// Map attribute-routed controllers (e.g., /api/reviews)
 app.MapControllers();
 
 app.Run();

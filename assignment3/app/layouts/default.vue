@@ -2,20 +2,38 @@
 const route = useRoute()
 const { player } = usePlayerState()
 
-const links = [
-  { to: '/stable', label: 'Stable' },
-  { to: '/gauntlet', label: 'Gauntlet' },
-  { to: '/shop', label: 'Shop' },
-]
+// ✅ No Home link anywhere.
+// ✅ Only show game pages when a player exists (prevents weird navigation before onboarding)
+const links = computed(() => {
+  const base = [{ to: '/reviews', label: 'Reviews' }]
+  const game = [
+    { to: '/stable', label: 'Stable' },
+    { to: '/gauntlet', label: 'Gauntlet' },
+    { to: '/shop', label: 'Shop' },
+  ]
+  return player.value ? [...base, ...game] : base
+})
 
 const gold = computed(() => player.value?.gold ?? 0)
-function isActive(to: string) { return route.path === to }
+
+function isActive(to: string) {
+  // ✅ make active highlight work for nested routes too (ex: /shop/whatever)
+  return route.path === to || route.path.startsWith(to + '/')
+}
+
+function onBrandClick(e: MouseEvent) {
+  // ✅ Prevent any navigation to "/" via the brand.
+  e.preventDefault()
+  // If a player exists, take them to Stable. Otherwise keep them on the current page.
+  if (player.value) navigateTo('/stable')
+}
 </script>
 
 <template>
   <div class="page">
     <header class="nav">
-      <NuxtLink to="/stable" class="brand">
+      <!-- ✅ Brand no longer routes to Home -->
+      <NuxtLink to="/stable" class="brand" @click="onBrandClick">
         <span class="mark" aria-hidden="true" />
         <span class="title">Stable Run</span>
       </NuxtLink>
@@ -23,7 +41,7 @@ function isActive(to: string) { return route.path === to }
       <div class="right">
         <span v-if="player" class="pill">💰 {{ gold }}</span>
 
-        <nav class="links">
+        <nav class="links" aria-label="Primary navigation">
           <NuxtLink
             v-for="l in links"
             :key="l.to"
