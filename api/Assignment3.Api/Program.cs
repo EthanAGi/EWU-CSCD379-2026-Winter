@@ -39,7 +39,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
+// TESTTESTTEST
 var app = builder.Build();
 
 // ✅ TEMP: Definitive DB connectivity test (safe for Azure logs)
