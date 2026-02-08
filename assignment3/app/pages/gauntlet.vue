@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Animal, BattleMove, BattleState, ItemKind } from '../types/game'
 import BattlePanel from '~/components/BattlePanel.vue'
+import { onBeforeRouteLeave } from 'vue-router'
 
 const { player, addGold, healAnimalToFull } = usePlayerState()
 
@@ -187,6 +188,83 @@ const runGold = ref(0)
 const playerAnimal = computed(() => {
   if (!player.value || !battle.value) return null
   return player.value.animals.find(a => a.id === battle.value!.playerAnimalId) ?? null
+})
+
+/** ✅ Are we “in an active fight”? (used for leave warning) */
+const inActiveFight = computed(() => !!battle.value && !battle.value.ended && !stageOverlay.value && !result.value)
+
+/**
+ * ✅ Leave warning state + modal
+ */
+const leaveModalOpen = ref(false)
+const leavePendingNav = ref<null | (() => void)>(null)
+
+function abortRun(reason = 'You left the fight. Progress was lost.') {
+  const b = battle.value
+  if (b?.playerAnimalId) {
+    // Heal the selected animal on abort/leave
+    healAnimalToFull(b.playerAnimalId)
+  }
+  // Mark ended so nothing else progresses
+  if (b) {
+    b.ended = true
+    b.outcome = 'loss'
+  }
+  // Optionally show a message (or not)
+  result.value = { outcome: 'loss', message: reason }
+  // Clear state like a reset
+  resetRun()
+}
+
+/**
+ * Intercept in-app navigation (Nuxt/Vue Router)
+ * - Show our modal (textbox warning)
+ * - If they confirm, abort + allow navigation
+ */
+onBeforeRouteLeave((_to, _from, next) => {
+  if (!inActiveFight.value) return next()
+
+  leaveModalOpen.value = true
+  leavePendingNav.value = () => next()
+  // block until user chooses
+  next(false)
+})
+
+function stayOnPage() {
+  leaveModalOpen.value = false
+  leavePendingNav.value = null
+}
+
+function leaveAnyway() {
+  const go = leavePendingNav.value
+  leaveModalOpen.value = false
+  leavePendingNav.value = null
+
+  abortRun('You left during a fight. The match ended and your animal was healed.')
+
+  // continue navigation
+  if (go) go()
+}
+
+/**
+ * Intercept browser-level leaving (refresh/close/tab)
+ * NOTE: You *cannot* run async work here reliably; this is just the warning.
+ */
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (!inActiveFight.value) return
+  e.preventDefault()
+  // Chrome requires returnValue to be set
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  if (!import.meta.client) return
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  if (!import.meta.client) return
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
 /** Battle item state */
@@ -627,6 +705,27 @@ watchEffect(() => {
       Choose an animal and fight 3 boss battles. Each turn: Attack, Defend, or Use Item.
     </p>
 
+    <!-- ✅ Leave warning modal -->
+    <div v-if="leaveModalOpen" class="overlay" role="dialog" aria-modal="true">
+      <div class="overlayCard">
+        <div class="overlayTop">
+          <div class="overlayBadge loss">LEAVING NOW?</div>
+        </div>
+
+        <div class="overlayText">
+          <div class="overlayHeadline">Progress will be lost</div>
+          <div class="muted">
+            You’re currently in a fight. If you leave this page, the match will end and your animal will be healed.
+          </div>
+        </div>
+
+        <div class="overlayActions">
+          <button class="btn primary" type="button" @click="stayOnPage">Stay</button>
+          <button class="btn" type="button" @click="leaveAnyway">Leave Anyway</button>
+        </div>
+      </div>
+    </div>
+
     <!-- If no player, don't blank out -->
     <div v-if="!player" class="panel" style="margin-top: 12px;">
       <b>No player found.</b>
@@ -764,6 +863,7 @@ watchEffect(() => {
 </template>
 
 <style scoped>
+/* (your existing styles unchanged) */
 .card {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 18px;

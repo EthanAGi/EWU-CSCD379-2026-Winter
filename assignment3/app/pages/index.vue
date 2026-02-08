@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AnimalKind } from '../types/game'
+import { onBeforeRouteLeave } from 'vue-router'
 
 const { player, createPlayer, chooseStarter, addGold } = usePlayerState()
 
@@ -29,6 +30,55 @@ function titleCase(s: string) {
 /** Optional UI feedback */
 const savingStarter = ref<AnimalKind | null>(null)
 const starterMsg = ref<string | null>(null)
+
+/**
+ * ----------------------------
+ * Leave warning (during starter save)
+ * ----------------------------
+ * If a user tries to navigate away while we are saving the starter to the DB,
+ * warn them that progress may be lost.
+ */
+const leaveModalOpen = ref(false)
+const leavePendingNav = ref<null | (() => void)>(null)
+
+const isSaving = computed(() => savingStarter.value !== null)
+
+onBeforeRouteLeave((_to, _from, next) => {
+  if (!isSaving.value) return next()
+
+  leaveModalOpen.value = true
+  leavePendingNav.value = () => next()
+  next(false)
+})
+
+function stayOnPage() {
+  leaveModalOpen.value = false
+  leavePendingNav.value = null
+}
+
+function leaveAnyway() {
+  const go = leavePendingNav.value
+  leaveModalOpen.value = false
+  leavePendingNav.value = null
+  if (go) go()
+}
+
+/** Browser refresh/close warning while saving (best-effort) */
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (!isSaving.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  if (!import.meta.client) return
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  if (!import.meta.client) return
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 
 async function pickStarter(kind: AnimalKind) {
   starterMsg.value = null
@@ -77,6 +127,27 @@ async function pickStarter(kind: AnimalKind) {
 
 <template>
   <section class="wrap">
+    <!-- ✅ Leave warning modal (only when saving) -->
+    <div v-if="leaveModalOpen" class="overlay" role="dialog" aria-modal="true">
+      <div class="overlayCard">
+        <div class="overlayTop">
+          <div class="overlayBadge warn">LEAVING NOW?</div>
+        </div>
+
+        <div class="overlayText">
+          <div class="overlayHeadline">Starter save in progress</div>
+          <div class="muted">
+            Your starter is currently being saved. If you leave now, the save may fail and you could lose progress.
+          </div>
+        </div>
+
+        <div class="overlayActions">
+          <button class="btn primary" type="button" @click="stayOnPage">Stay</button>
+          <button class="btn" type="button" @click="leaveAnyway">Leave Anyway</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ✅ Simple nav (NO Home link ever) -->
     <nav class="nav">
       <NuxtLink class="navBtn" to="/reviews">Reviews</NuxtLink>
@@ -166,6 +237,7 @@ async function pickStarter(kind: AnimalKind) {
   background:rgba(0,0,0,.18);
   color:rgba(255,255,255,.92);
 }
+
 .btn{
   border-radius:14px;
   padding:10px 14px;
@@ -180,5 +252,65 @@ async function pickStarter(kind: AnimalKind) {
   background:linear-gradient(90deg,#7c5cff,#35d6c5);
   color:#0b1020;
   font-weight:900;
+}
+
+/* Modal overlay (reuses your style language) */
+.overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  z-index: 999;
+  padding: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.overlayCard{
+  width: min(520px, 94vw);
+  max-width: 94vw;
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.14);
+  background:
+    radial-gradient(600px 260px at 30% 10%, rgba(124,92,255,.18), transparent 55%),
+    radial-gradient(600px 260px at 80% 35%, rgba(53, 214, 197, .14), transparent 55%),
+    rgba(15, 18, 30, 0.92);
+  box-shadow: 0 24px 80px rgba(0,0,0,.55);
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.overlayTop{ display:flex; justify-content:flex-end; }
+
+.overlayBadge{
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.overlayBadge.warn{ background: rgba(255, 200, 70, .16); }
+
+.overlayText{ margin-top: 8px; text-align:center; }
+.overlayHeadline{
+  font-size: 22px;
+  font-weight: 1000;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.overlayActions{
+  margin-top: 14px;
+  display:flex;
+  gap: 10px;
+  justify-content:center;
+  flex-wrap:wrap;
 }
 </style>
