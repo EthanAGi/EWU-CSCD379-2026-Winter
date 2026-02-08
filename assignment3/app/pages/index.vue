@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { AnimalKind } from '../types/game'
 
-const { player, createPlayer, chooseStarter } = usePlayerState()
+const { player, createPlayer, chooseStarter, addGold } = usePlayerState()
+
+const config = useRuntimeConfig()
+const API_BASE = (config.public.apiBase as string | undefined)?.replace(/\/+$/, '') || '' // e.g. http://localhost:5072
 
 const name = ref('')
 
@@ -21,8 +24,39 @@ function submitName() {
   createPlayer(n)
 }
 
-function pickStarter(kind: AnimalKind) {
+function titleCase(s: string) {
+  if (!s) return s
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+async function pickStarter(kind: AnimalKind) {
+  // 1) local save: adds starter animal to local state
   chooseStarter(kind)
+
+  // 2) give starter bonus gold
+  addGold(300)
+
+  // 3) persist to API/DB as a PLAYER ANIMAL (PlayersAnimal)
+  const p = player.value
+  if (!p) return
+
+  try {
+    // Call the .NET API directly (avoids Nuxt router 404 / proxy confusion)
+    await $fetch(`${API_BASE}/api/animals/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        ownerPlayerId: p.id,
+        ownerName: p.name,
+        kind,
+        // "Player's animal" naming format
+        name: `${p.name}'s ${titleCase(kind)}`,
+      },
+    })
+  } catch (e) {
+    // Don’t block the player from starting if the DB call fails
+    console.error('Failed to save starter to DB:', e)
+  }
 }
 </script>
 

@@ -67,6 +67,9 @@ const handleClick = () => {
   cursor: pointer;
 }
 
+/* keep sprite above ground etc; stable can layer world/panel independently */
+.spriteBtn { z-index: 2; }
+
 .spriteBtn.selected::after {
   content: '';
   position: absolute;

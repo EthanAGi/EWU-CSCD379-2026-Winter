@@ -11,15 +11,21 @@ const props = withDefaults(defineProps<AnimalFocusPanelProps>(), {})
 const emit = defineEmits<{
   close: []
   pet: [animalId: string]
-  feed: [animalId: string, kind: ItemKind | undefined]
+  feed: [animalId: string, kind: ItemKind]
 }>()
 
 const { petAnimal, feedAnimal } = usePlayerState()
 
-// Pet mechanics
-const PET_COOLDOWN_MS = 2500
+/* ------------------------------
+ * Pet cooldown logic (3 seconds)
+ * ------------------------------ */
+const PET_COOLDOWN_MS = 3000
 const nowMs = ref(Date.now())
 let nowRaf: number | null = null
+
+const petReadyAt = ref(0)
+const canPet = computed(() => nowMs.value >= petReadyAt.value)
+const petCooldownLeftMs = computed(() => Math.max(0, petReadyAt.value - nowMs.value))
 
 function startNowTicker() {
   if (nowRaf !== null) cancelAnimationFrame(nowRaf)
@@ -31,47 +37,15 @@ function startNowTicker() {
   loop()
 }
 
-const petReadyAt = ref(0)
-const canPet = computed(() => nowMs.value >= petReadyAt.value)
-const petCooldownLeftMs = computed(() => Math.max(0, petReadyAt.value - nowMs.value))
-
 function formatCooldown(ms: number) {
-  const s = Math.ceil(ms / 1000)
-  return `${s}s`
+  return `${Math.ceil(ms / 1000)}s`
 }
 
-// VFX
+/* ------------------------------
+ * VFX helpers
+ * ------------------------------ */
 type Heart = { id: string; x: number; y: number; driftX: number }
 const hearts = ref<Heart[]>([])
-
-function rand(min: number, max: number) {
-  return min + Math.random() * (max - min)
-}
-
-function spawnHeartsForAnimal() {
-  const SPRITE_SIZE = 64
-  // Assuming the animal is rendered somewhere, we spawn from center
-  const baseX = 32 // Center of sprite
-  const baseY = 58 // Above sprite
-
-  const count = 8
-  const batch: Heart[] = []
-  for (let i = 0; i < count; i++) {
-    batch.push({
-      id: Math.random().toString(16).slice(2),
-      x: baseX + rand(-18, 18),
-      y: baseY + rand(-12, 12),
-      driftX: rand(-10, 10),
-    })
-  }
-
-  hearts.value.push(...batch)
-
-  window.setTimeout(() => {
-    const ids = new Set(batch.map(h => h.id))
-    hearts.value = hearts.value.filter(h => !ids.has(h.id))
-  }, 900)
-}
 
 type FloatText = {
   id: string
@@ -83,76 +57,240 @@ type FloatText = {
 }
 const floatTexts = ref<FloatText[]>([])
 
-function spawnFloatText(kind: 'atk' | 'def', amount: number) {
-  const baseX = 32
-  const baseY = 48
+function rand(min: number, max: number) {
+  return min + Math.random() * (max - min)
+}
 
+function spawnHearts() {
+  const batch: Heart[] = Array.from({ length: 8 }).map(() => ({
+    id: Math.random().toString(16).slice(2),
+    x: 32 + rand(-18, 18),
+    y: 58 + rand(-12, 12),
+    driftX: rand(-10, 10),
+  }))
+
+  hearts.value.push(...batch)
+  setTimeout(() => {
+    const ids = new Set(batch.map(h => h.id))
+    hearts.value = hearts.value.filter(h => !ids.has(h.id))
+  }, 900)
+}
+
+function spawnFloat(kind: 'atk' | 'def', amount: number) {
   const item: FloatText = {
     id: Math.random().toString(16).slice(2),
-    x: baseX + rand(-16, 16),
-    y: baseY + rand(-10, 8),
+    x: 32 + rand(-16, 16),
+    y: 48 + rand(-10, 8),
     driftX: rand(-10, 10),
-    text: `${kind === 'atk' ? 'ATK' : 'DEF'} +${amount}`,
+    text: `${kind.toUpperCase()} +${amount}`,
     kind,
   }
 
   floatTexts.value.push(item)
-  window.setTimeout(() => {
+  setTimeout(() => {
     floatTexts.value = floatTexts.value.filter(t => t.id !== item.id)
   }, 950)
 }
 
-function crossedMultipleOf5(before: number, after: number) {
-  return Math.floor(after / 5) > Math.floor(before / 5)
+/* ------------------------------
+ * Affection milestone logic
+ * - when crossing 5,10,15,... give boosts
+ * ------------------------------ */
+function applyAffectionMilestones(before: number, after: number) {
+  const beforeMilestones = Math.floor(before / 5)
+  const afterMilestones = Math.floor(after / 5)
+  const gained = afterMilestones - beforeMilestones
+  if (gained <= 0) return
+
+  props.animal.stats.attack += gained
+  props.animal.stats.defense += gained
+  props.animal.stats.hpMax += gained * 2
+  props.animal.hpCurrent = Math.min(
+    props.animal.stats.hpMax,
+    props.animal.hpCurrent + gained * 2
+  )
+
+  spawnFloat('atk', gained)
+  spawnFloat('def', gained)
 }
 
-function applyMilestoneBoostIfNeeded(beforeAff: number) {
-  const afterAff = props.animal.stats.affection
+/* ------------------------------
+ * Growth items dropdown
+ * ------------------------------ */
+type GrowthKind = 'treat' | 'armorSnack' | 'proteinBite'
+const growthOptions = [
+  { label: 'None', value: '' },
+  { label: 'Treat (+2 AFF)', value: 'treat' },
+  { label: 'Armor Snack (+DEF)', value: 'armorSnack' },
+  { label: 'Protein Bite (+ATK)', value: 'proteinBite' },
+] as const
 
-  if (!crossedMultipleOf5(beforeAff, afterAff)) return
+const selectedGrowth = ref<string>('')
 
-  const roll = Math.random() < 0.5 ? 'atk' : 'def'
-  if (roll === 'atk') {
-    props.animal.stats.attack += 2
-    spawnFloatText('atk', 2)
-  } else {
-    props.animal.stats.defense += 2
-    spawnFloatText('def', 2)
+function invCount(kind: GrowthKind) {
+  return Number(props.player?.inventory?.[kind] ?? 0)
+}
+
+const canUseSelected = computed(() => {
+  const k = selectedGrowth.value as GrowthKind | ''
+  if (!k) return false
+  return invCount(k) > 0
+})
+
+/* ------------------------------
+ * FOLLOW PANEL (camera/overlay)
+ * Panel follows selected animal, clamps to pen edges.
+ * ------------------------------ */
+const panelRef = ref<HTMLElement | null>(null)
+const xPx = ref(0)
+const yPx = ref(0)
+
+let followRaf: number | null = null
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function findPenEl(): HTMLElement | null {
+  // Stable page should have <div class="pen"> as container
+  const root = panelRef.value?.parentElement
+  return (root?.closest?.('.pen') as HTMLElement | null) ?? null
+}
+
+function findSelectedSpriteEl(): HTMLElement | null {
+  // Selected sprite has .spriteBtn.selected on the button
+  const pen = findPenEl()
+  if (!pen) return null
+  return pen.querySelector('.spriteBtn.selected') as HTMLElement | null
+}
+
+function setPanelToFollow() {
+  const pen = findPenEl()
+  const spriteEl = findSelectedSpriteEl()
+  const panelEl = panelRef.value
+  if (!pen || !spriteEl || !panelEl) return
+
+  const penRect = pen.getBoundingClientRect()
+  const spRect = spriteEl.getBoundingClientRect()
+
+  // anchor: to the right of sprite, vertically aligned to its top
+  const desiredLeft = spRect.right - penRect.left + 12
+  const desiredTop = spRect.top - penRect.top - 6
+
+  const panelW = panelEl.offsetWidth || 360
+  const panelH = panelEl.offsetHeight || 220
+
+  // clamp to pen bounds (freeze at edge)
+  const minLeft = 12
+  const minTop = 12
+  const maxLeft = Math.max(minLeft, penRect.width - panelW - 12)
+  const maxTop = Math.max(minTop, penRect.height - panelH - 12)
+
+  xPx.value = clamp(desiredLeft, minLeft, maxLeft)
+  yPx.value = clamp(desiredTop, minTop, maxTop)
+}
+
+function followLoop() {
+  setPanelToFollow()
+  followRaf = requestAnimationFrame(followLoop)
+}
+
+function startFollow() {
+  if (followRaf !== null) cancelAnimationFrame(followRaf)
+  followRaf = requestAnimationFrame(followLoop)
+}
+
+function stopFollow() {
+  if (followRaf !== null) cancelAnimationFrame(followRaf)
+  followRaf = null
+}
+
+/* ---- window resize listener (NO VueUse) ---- */
+function onResize() {
+  setPanelToFollow()
+}
+let resizeBound = false
+
+onMounted(() => {
+  startFollow()
+
+  if (import.meta.client && !resizeBound) {
+    window.addEventListener('resize', onResize, { passive: true })
+    resizeBound = true
   }
-}
 
+  // initial position after render
+  nextTick(() => setPanelToFollow())
+})
+
+watch(
+  () => props.animal?.id,
+  () => {
+    nextTick(() => setPanelToFollow())
+  }
+)
+
+watch(
+  () => panelRef.value,
+  () => nextTick(() => setPanelToFollow())
+)
+
+/* ------------------------------
+ * Actions
+ * IMPORTANT:
+ * - do NOT manually change affection here (state should update in composable)
+ * - compute before/after then apply milestone boosts locally
+ * ------------------------------ */
 function doPet() {
-  if (!canPet.value || !props.player) return
+  if (!props.player) return
+  if (!canPet.value) return
 
   const beforeAff = props.animal.stats.affection
 
-  // Start cooldown FIRST (anti spam)
   petReadyAt.value = Date.now() + PET_COOLDOWN_MS
   nowMs.value = Date.now()
   startNowTicker()
 
+  // should modify animal in state
   petAnimal(props.animal.id)
-  spawnHeartsForAnimal()
-  applyMilestoneBoostIfNeeded(beforeAff)
 
+  const afterAff = props.animal.stats.affection
+  applyAffectionMilestones(beforeAff, afterAff)
+
+  spawnHearts()
   emit('pet', props.animal.id)
 }
 
-const feedChoice = ref<ItemKind | 'basic'>('basic')
+function doUseGrowth() {
+  if (!props.player) return
+  const kind = selectedGrowth.value as GrowthKind | ''
+  if (!kind) return
+  if (invCount(kind) <= 0) return
 
-function doFeed() {
-  const choice = feedChoice.value
-  feedAnimal(props.animal.id, choice === 'basic' ? undefined : choice)
-  emit('feed', props.animal.id, choice === 'basic' ? undefined : (choice as ItemKind))
+  const beforeAff = props.animal.stats.affection
+
+  feedAnimal(props.animal.id, kind as unknown as ItemKind)
+
+  const afterAff = props.animal.stats.affection
+  applyAffectionMilestones(beforeAff, afterAff)
+
+  spawnHearts()
+  emit('feed', props.animal.id, kind as unknown as ItemKind)
 }
 
 onBeforeUnmount(() => {
   if (nowRaf !== null) cancelAnimationFrame(nowRaf)
+  stopFollow()
+
+  if (import.meta.client && resizeBound) {
+    window.removeEventListener('resize', onResize)
+    resizeBound = false
+  }
 })
 </script>
 
 <template>
-  <div class="panel">
+  <div ref="panelRef" class="panel" :style="{ left: xPx + 'px', top: yPx + 'px' }">
     <div class="panelTop">
       <div class="panelTitle">
         <span class="tag">{{ animal.kind.toUpperCase() }}</span>
@@ -161,56 +299,56 @@ onBeforeUnmount(() => {
       <button class="xBtn" @click="$emit('close')" type="button" aria-label="Close">✕</button>
     </div>
 
-    <div class="muted small">{{ animal.ownerName }}'s {{ animal.kind }}</div>
-
-    <!-- VFX layers (hearts and float text) -->
-    <div class="vfxContainer">
-      <div class="heartsLayer" aria-hidden="true">
-        <div
-          v-for="h in hearts"
-          :key="h.id"
-          class="heart"
-          :style="{ left: h.x + 'px', top: h.y + 'px', '--drift': h.driftX + 'px' }"
-        >
-          ♥
-        </div>
-      </div>
-
-      <div class="floatTextLayer" aria-hidden="true">
-        <div
-          v-for="t in floatTexts"
-          :key="t.id"
-          class="floatText"
-          :class="{ atk: t.kind === 'atk', def: t.kind === 'def' }"
-          :style="{ left: t.x + 'px', top: t.y + 'px', '--drift': t.driftX + 'px' }"
-        >
-          {{ t.text }}
-        </div>
-      </div>
-    </div>
-
     <div class="stats">
       <div class="stat"><b>HP</b> {{ animal.hpCurrent }} / {{ animal.stats.hpMax }}</div>
       <div class="stat"><b>ATK</b> {{ animal.stats.attack }}</div>
       <div class="stat"><b>DEF</b> {{ animal.stats.defense }}</div>
-      <div class="stat"><b>Affection</b> {{ animal.stats.affection }} / 50</div>
+      <div class="stat"><b>AFF</b> {{ animal.stats.affection }}</div>
     </div>
 
     <div class="actions">
-      <button class="btn primary" @click="doPet" type="button" :disabled="!canPet">
-        <span v-if="canPet">Pet</span>
+      <button class="btn primary" @click="doPet" :disabled="!canPet" type="button">
+        <span v-if="canPet">Pet (+1 AFF)</span>
         <span v-else>Pet ({{ formatCooldown(petCooldownLeftMs) }})</span>
       </button>
 
       <div class="feedRow">
-        <select v-model="feedChoice" class="select">
-          <option value="basic">Basic Feed (free)</option>
-          <option value="treat">Treat (inv: {{ player?.inventory?.treat ?? 0 }})</option>
-          <option value="armorSnack">Armor Snack (inv: {{ player?.inventory?.armorSnack ?? 0 }})</option>
-          <option value="proteinBite">Protein Bite (inv: {{ player?.inventory?.proteinBite ?? 0 }})</option>
+        <select v-model="selectedGrowth" class="select" aria-label="Select growth item">
+          <option v-for="opt in growthOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
         </select>
 
-        <button class="btn" @click="doFeed" type="button">Feed</button>
+        <button class="btn" type="button" @click="doUseGrowth" :disabled="!canUseSelected">
+          Use
+        </button>
+      </div>
+
+      <div class="counts muted small">
+        <span>Treat: {{ invCount('treat') }}</span>
+        <span>Armor: {{ invCount('armorSnack') }}</span>
+        <span>Protein: {{ invCount('proteinBite') }}</span>
+      </div>
+    </div>
+
+    <div class="vfxContainer" aria-hidden="true">
+      <div
+        v-for="h in hearts"
+        :key="h.id"
+        class="heart"
+        :style="{ left: h.x + 'px', top: h.y + 'px', '--drift': h.driftX + 'px' }"
+      >
+        ♥
+      </div>
+
+      <div
+        v-for="t in floatTexts"
+        :key="t.id"
+        class="floatText"
+        :class="t.kind"
+        :style="{ left: t.x + 'px', top: t.y + 'px', '--drift': t.driftX + 'px' }"
+      >
+        {{ t.text }}
       </div>
     </div>
   </div>
@@ -218,13 +356,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .panel {
+  position: absolute;
+  z-index: 10;
+
+  width: min(420px, calc(100% - 28px));
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(15, 18, 30, 0.86);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
   padding: 14px;
   backdrop-filter: blur(8px);
-  position: relative;
+  transform: translate3d(0, 0, 0);
 }
 
 .panelTop {
@@ -268,20 +410,12 @@ onBeforeUnmount(() => {
 .muted { color: rgba(255, 255, 255, 0.72); }
 .small { font-size: 12px; }
 
-/* VFX */
 .vfxContainer {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
   border-radius: 18px;
-}
-
-.heartsLayer,
-.floatTextLayer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
 }
 
 .heart {
@@ -325,7 +459,6 @@ onBeforeUnmount(() => {
   100% { transform: translate3d(var(--drift), -46px, 0px) scale(1.05); opacity: 0; }
 }
 
-/* Stats */
 .stats {
   display: flex;
   gap: 10px;
@@ -345,8 +478,7 @@ onBeforeUnmount(() => {
   margin-top: 12px;
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
 }
 
 .btn {
@@ -375,10 +507,18 @@ onBeforeUnmount(() => {
 }
 
 .select {
+  flex: 1;
+  min-width: 180px;
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.22);
   color: rgba(255, 255, 255, 0.92);
+}
+
+.counts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 </style>

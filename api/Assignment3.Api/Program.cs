@@ -6,6 +6,25 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 
+// ✅ CORS (allow Nuxt dev server to call this API on localhost)
+var corsPolicyName = "NuxtDev";
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(corsPolicyName, policy =>
+    {
+        policy
+            .WithOrigins("http://localhost:3000")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+
+        // If you ever use cookies/auth between Nuxt and API, use this instead:
+        // policy.WithOrigins("http://localhost:3000")
+        //       .AllowAnyHeader()
+        //       .AllowAnyMethod()
+        //       .AllowCredentials();
+    });
+});
+
 // Entity Framework + SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -41,6 +60,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// ✅ Enable CORS (must be before MapControllers; before auth/authorization if you add them later)
+app.UseCors(corsPolicyName);
 
 // Map attribute-routed controllers (e.g., /api/scores)
 app.MapControllers();

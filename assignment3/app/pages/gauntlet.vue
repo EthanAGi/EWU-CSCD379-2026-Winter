@@ -4,10 +4,10 @@ import BattlePanel from '~/components/BattlePanel.vue'
 
 const { player, addGold, healAnimalToFull } = usePlayerState()
 
-// redirect if no player
-watchEffect(() => {
-  if (import.meta.client && !player.value) navigateTo('/')
-})
+// ✅ API base for the separate .NET project (Assignment3.Api)
+// nuxt.config.ts sets default to http://localhost:5072, so this should be present.
+const config = useRuntimeConfig()
+const API_BASE = (config.public.apiBase as string | undefined)?.replace(/\/+$/, '') || ''
 
 const chosenId = ref<string | null>(null)
 const choosing = computed(() => !battle.value && !result.value && !stageOverlay.value)
@@ -25,39 +25,155 @@ const stageOverlay = ref<{
   totalRunGold: number
 } | null>(null)
 
-function bossForStage(stage: 1 | 2 | 3): Animal {
-  const base = { ownerPlayerId: 'npc', ownerName: 'Gauntlet' }
+/** -------------------------------------------------------
+ *  Pull possible opponents from the DATABASE (separate API)
+ *  - Base animals (templates)   GET {API_BASE}/api/animals/templates
+ *  - Player animals (your DB)   GET {API_BASE}/api/animals/player/{playerId}
+ *  ------------------------------------------------------*/
 
-  if (stage === 1) {
-    return {
-      id: 'boss-1',
-      ...base,
-      name: 'Bristle Badger',
-      kind: 'boar',
-      stats: { attack: 6, defense: 4, affection: 0, level: 1, hpMax: 28 },
-      hpCurrent: 28,
-    }
-  }
+type AnimalTemplateDto = {
+  id: number
+  kind: string
+  attack: number
+  defense: number
+  affection: number
+  level: number
+  hpMax: number
+}
 
-  if (stage === 2) {
-    return {
-      id: 'boss-2',
-      ...base,
-      name: 'Talons the Owl',
-      kind: 'owl',
-      stats: { attack: 8, defense: 6, affection: 0, level: 1, hpMax: 34 },
-      hpCurrent: 34,
-    }
-  }
+type PlayerAnimalDto = {
+  id: number
+  ownerPlayerId: string
+  ownerName: string
+  name: string
+  kind: string
+  attack: number
+  defense: number
+  affection: number
+  level: number
+  hpMax: number
+  hpCurrent: number
+  createdAt: string
+  templateId: number
+}
 
+const templatesDb = ref<AnimalTemplateDto[]>([])
+const playerAnimalsDb = ref<PlayerAnimalDto[]>([])
+const opponentsPool = ref<Animal[]>([])
+const opponentsLoaded = ref(false)
+const opponentsLoadErr = ref<string | null>(null)
+
+function titleCase(s: string) {
+  if (!s) return s
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+function dtoToAnimalFromTemplate(t: AnimalTemplateDto): Animal {
+  const base = { ownerPlayerId: 'npc', ownerName: 'Wilds' }
   return {
-    id: 'boss-3',
+    id: `tpl-${t.id}`,
     ...base,
-    name: 'Vulpine Prime',
-    kind: 'fox',
-    stats: { attack: 10, defense: 7, affection: 0, level: 1, hpMax: 40 },
-    hpCurrent: 40,
+    name: titleCase(t.kind),
+    kind: t.kind as any,
+    stats: { attack: t.attack, defense: t.defense, affection: t.affection, level: t.level, hpMax: t.hpMax },
+    hpCurrent: t.hpMax,
   }
+}
+
+function dtoToAnimalFromPlayer(a: PlayerAnimalDto): Animal {
+  return {
+    id: `pa-${a.id}`,
+    ownerPlayerId: a.ownerPlayerId,
+    ownerName: a.ownerName,
+    name: a.name,
+    kind: a.kind as any,
+    stats: { attack: a.attack, defense: a.defense, affection: a.affection, level: a.level, hpMax: a.hpMax },
+    hpCurrent: a.hpCurrent,
+  }
+}
+
+function cloneAnimal(a: Animal): Animal {
+  return { ...a, stats: { ...a.stats } }
+}
+
+/** Load DB animals once the player exists */
+async function loadOpponentsFromDb() {
+  if (!player.value) return
+  if (opponentsLoaded.value) return
+
+  opponentsLoadErr.value = null
+
+  try {
+    // ✅ Uses API_BASE directly (works even if Nuxt proxy is not working)
+    const templatesUrl = `${API_BASE}/api/animals/templates`
+    const playerAnimalsUrl = `${API_BASE}/api/animals/player/${encodeURIComponent(player.value.id)}`
+
+    const [tpls, pAnimals] = await Promise.all([
+      $fetch<AnimalTemplateDto[]>(templatesUrl),
+      $fetch<PlayerAnimalDto[]>(playerAnimalsUrl),
+    ])
+
+    templatesDb.value = Array.isArray(tpls) ? tpls : []
+    playerAnimalsDb.value = Array.isArray(pAnimals) ? pAnimals : []
+
+    const pool: Animal[] = [
+      ...templatesDb.value.map(dtoToAnimalFromTemplate),
+      ...playerAnimalsDb.value.map(dtoToAnimalFromPlayer),
+    ]
+
+    opponentsPool.value = pool
+    opponentsLoaded.value = true
+  } catch (e: any) {
+    console.error('Failed to load opponents from DB:', e)
+    opponentsLoadErr.value =
+      'Failed to load opponents from the database (API unreachable). Using local fallback enemies.'
+    opponentsPool.value = []
+    opponentsLoaded.value = true // prevent infinite retry spam; refresh page to retry
+  }
+}
+
+/**
+ * Pick a stage-appropriate random opponent from the pool.
+ * If DB pool is empty, use local fallback enemies.
+ */
+function pickRandomOpponent(stage: 1 | 2 | 3, usedIds: Set<string>, avoidKind?: string, avoidId?: string): Animal {
+  const pool = opponentsPool.value
+
+  if (!pool || pool.length === 0) {
+    const base = { ownerPlayerId: 'npc', ownerName: 'Wilds' }
+    const fallback: Animal[] = [
+      { id: 'fb-dog', ...base, name: 'Dog', kind: 'dog', stats: { attack: 5, defense: 4, affection: 0, level: 1, hpMax: 30 }, hpCurrent: 30 },
+      { id: 'fb-cat', ...base, name: 'Cat', kind: 'cat', stats: { attack: 6, defense: 3, affection: 0, level: 1, hpMax: 28 }, hpCurrent: 28 },
+      { id: 'fb-hamster', ...base, name: 'Hamster', kind: 'hamster', stats: { attack: 4, defense: 5, affection: 0, level: 1, hpMax: 32 }, hpCurrent: 32 },
+      { id: 'fb-owl', ...base, name: 'Owl', kind: 'owl', stats: { attack: 7, defense: 6, affection: 0, level: 1, hpMax: 36 }, hpCurrent: 36 },
+      { id: 'fb-fox', ...base, name: 'Fox', kind: 'fox', stats: { attack: 8, defense: 5, affection: 0, level: 1, hpMax: 34 }, hpCurrent: 34 },
+      { id: 'fb-boar', ...base, name: 'Boar', kind: 'boar', stats: { attack: 6, defense: 8, affection: 0, level: 1, hpMax: 40 }, hpCurrent: 40 },
+    ]
+    return cloneAnimal(fallback[Math.floor(Math.random() * fallback.length)]!)
+  }
+
+  const stageFilter = (a: Animal) => {
+    const hp = a.stats.hpMax
+    if (stage === 1) return hp <= 32
+    if (stage === 2) return hp <= 36
+    return true
+  }
+
+  const baseFilter = (a: Animal) => {
+    if (usedIds.has(a.id)) return false
+    if (avoidId && a.id === avoidId) return false
+    if (avoidKind && a.kind === (avoidKind as any)) return false
+    return true
+  }
+
+  const stageCandidates = pool.filter(a => baseFilter(a) && stageFilter(a))
+  const anyCandidates = pool.filter(a => baseFilter(a))
+  const candidates = stageCandidates.length > 0 ? stageCandidates : anyCandidates
+
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)]!
+  const fresh = cloneAnimal(chosen)
+  fresh.hpCurrent = fresh.stats.hpMax
+  return fresh
 }
 
 function rewardForStage(stage: 1 | 2 | 3): number {
@@ -67,8 +183,6 @@ function rewardForStage(stage: 1 | 2 | 3): number {
 }
 
 const battle = ref<BattleState | null>(null)
-
-/** Total gold earned THIS gauntlet run (not lifetime) */
 const runGold = ref(0)
 
 const playerAnimal = computed(() => {
@@ -76,7 +190,7 @@ const playerAnimal = computed(() => {
   return player.value.animals.find(a => a.id === battle.value!.playerAnimalId) ?? null
 })
 
-/** -------- Battle item state (wears off after each boss fight) -------- */
+/** Battle item state */
 const atkMult = ref(1)
 const defMult = ref(1)
 
@@ -85,26 +199,45 @@ function resetBattleBuffs() {
   defMult.value = 1
 }
 
-function startGauntlet() {
+/** Store the 3 opponents for this run */
+const runOpponents = ref<Animal[]>([])
+
+async function startGauntlet() {
   if (!player.value) return
   if (!chosenId.value) return
+
+  // Load DB pool (safe even if it fails)
+  await loadOpponentsFromDb()
 
   runGold.value = 0
   stageOverlay.value = null
   result.value = null
 
+  const chosen = player.value.animals.find(a => a.id === chosenId.value) ?? null
+  const avoidKind = chosen?.kind
+  const avoidId = chosen?.id
+
+  const used = new Set<string>()
+  const opp1 = pickRandomOpponent(1, used, avoidKind as any, avoidId)
+  used.add(opp1.id)
+  const opp2 = pickRandomOpponent(2, used, avoidKind as any, avoidId)
+  used.add(opp2.id)
+  const opp3 = pickRandomOpponent(3, used, avoidKind as any, avoidId)
+  used.add(opp3.id)
+
+  runOpponents.value = [opp1, opp2, opp3]
+
   battle.value = {
     stage: 1,
     round: 1,
     playerAnimalId: chosenId.value,
-    enemy: bossForStage(1),
+    enemy: cloneAnimal(runOpponents.value[0]!),
     playerDefending: false,
     enemyDefending: false,
     log: ['You entered the Gauntlet.'],
     ended: false,
   }
 
-  // reset visuals + buffs
   playerHit.value = false
   enemyHit.value = false
   playerAttacking.value = false
@@ -118,23 +251,18 @@ function calcDamage(attackerAtk: number, defenderDef: number, defenderIsDefendin
   return defenderIsDefending ? Math.ceil(raw * 0.5) : raw
 }
 
-// Option B AI: defend when low hp (<= 35%), otherwise attack
+// Simple AI
 function enemyChooseMove(enemy: Animal): BattleMove {
   const hpPct = enemy.hpCurrent / enemy.stats.hpMax
   return hpPct <= 0.35 ? 'defend' : 'attack'
 }
 
-/** -------- Sprites + HP helpers -------- */
+/** Sprites + HP */
 function spriteUrl(kind: string) {
   return `/sprites/${kind}.png`
 }
 
-function hpPercent(current: number, max: number): number {
-  if (max <= 0) return 0
-  return Math.max(0, Math.min(100, (current / max) * 100))
-}
-
-/** -------- Hit (flash red) toggles -------- */
+/** Hit flash */
 const playerHit = ref(false)
 const enemyHit = ref(false)
 let playerHitTimeout: number | null = null
@@ -157,10 +285,7 @@ onBeforeUnmount(() => {
   if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
 })
 
-/** -------- Attack lunge animation toggles --------
- *  - If attack: add class for quick lunge forward, then return.
- *  - If defend / item: no movement.
- */
+/** Attack animation toggles */
 const isAnimating = ref(false)
 const playerAttacking = ref(false)
 const enemyAttacking = ref(false)
@@ -183,7 +308,7 @@ function playAttackAnimation(playerMove: BattleMove | 'item', enemyMove: BattleM
       enemyAttacking.value = false
       isAnimating.value = false
       animTimeout = null
-    }, 260) 
+    }, 260)
   }
 }
 
@@ -191,28 +316,12 @@ onBeforeUnmount(() => {
   clearAnimTimeout()
 })
 
-/** -------- Inventory helpers (persist by leveraging addGold(0)) -------- */
+/** Inventory helpers */
 const battleItemDefs = [
-  {
-    kind: 'bandage' as ItemKind,
-    name: 'Bandage',
-    desc: 'Heals 30% HP (keeps the health).',
-  },
-  {
-    kind: 'medkit' as ItemKind,
-    name: 'Medkit',
-    desc: 'Heals 70% HP (keeps the health).',
-  },
-  {
-    kind: 'attackPill' as ItemKind,
-    name: 'Attack Boost Pill',
-    desc: 'Doubles attack for this boss fight only.',
-  },
-  {
-    kind: 'defensePill' as ItemKind,
-    name: 'Defense Pill',
-    desc: 'Doubles defense for this boss fight only.',
-  },
+  { kind: 'bandage' as ItemKind, name: 'Bandage', desc: 'Heals 30% HP (keeps the health).' },
+  { kind: 'medkit' as ItemKind, name: 'Medkit', desc: 'Heals 70% HP (keeps the health).' },
+  { kind: 'attackPill' as ItemKind, name: 'Attack Boost Pill', desc: 'Doubles attack for this boss fight only.' },
+  { kind: 'defensePill' as ItemKind, name: 'Defense Pill', desc: 'Doubles defense for this boss fight only.' },
 ] as const
 
 const usableBattleItems = computed(() => {
@@ -225,12 +334,10 @@ const selectedBattleItem = ref<ItemKind | ''>('')
 
 watchEffect(() => {
   const list = usableBattleItems.value
-
   if (list.length === 0) {
     selectedBattleItem.value = ''
     return
   }
-
   const stillValid = list.some(x => x.kind === selectedBattleItem.value)
   if (!stillValid) {
     const first = list[0]
@@ -238,20 +345,16 @@ watchEffect(() => {
   }
 })
 
-
 function consumeItem(kind: ItemKind): boolean {
   if (!player.value) return false
   const have = player.value.inventory[kind] ?? 0
   if (have <= 0) return false
   player.value.inventory[kind] = have - 1
-
-  // Persist without changing gold:
-  // addGold always calls save() in your composable, so addGold(0) writes inventory to localStorage.
   addGold(0)
   return true
 }
 
-/** -------- Final result overlay helpers -------- */
+/** Overlays */
 const showOverlay = computed(() => !!result.value)
 
 const overlayTitle = computed(() => {
@@ -261,7 +364,6 @@ const overlayTitle = computed(() => {
 
 const overlaySpriteKind = computed(() => {
   if (!result.value || !battle.value || !playerAnimal.value) return null
-  // if you WON => your animal, if you LOST => enemy
   return result.value.outcome === 'win' ? playerAnimal.value.kind : battle.value.enemy.kind
 })
 
@@ -279,11 +381,8 @@ function closeOverlayBackToStable() {
   navigateTo('/stable')
 }
 
-/** -------- Stage overlay actions (continue / drop out) -------- */
-
 const stageOverlaySpriteKind = computed(() => {
   if (!stageOverlay.value || !playerAnimal.value) return null
-  // winner is always the player animal for stage cleared
   return playerAnimal.value.kind
 })
 
@@ -296,13 +395,18 @@ function continueToNextStage() {
   const b = battle.value
   if (!b || !stageOverlay.value) return
 
-  // ✅ Pills wear off after the boss fight ends
   resetBattleBuffs()
 
-  // move to next stage
   const nextStage = (b.stage + 1) as 2 | 3
   b.stage = nextStage
-  b.enemy = bossForStage(nextStage)
+
+  const nextEnemy = runOpponents.value[nextStage - 1]
+  if (nextEnemy) {
+    const fresh = cloneAnimal(nextEnemy)
+    fresh.hpCurrent = fresh.stats.hpMax
+    b.enemy = fresh
+  }
+
   b.round = 1
   b.playerDefending = false
   b.enemyDefending = false
@@ -315,33 +419,27 @@ function dropOutWithWinnings() {
   const b = battle.value
   if (!b || !playerAnimal.value) return
 
-  // ✅ run ends => buffs cleared
   resetBattleBuffs()
-
-  // Heal because run ends
   healAnimalToFull(b.playerAnimalId)
 
   const total = runGold.value
   stageOverlay.value = null
 
-  // show final WIN overlay with total gold message
   result.value = {
     outcome: 'win',
     message: `You dropped out safely with $${total} from this run.`,
   }
 
-  // Mark run ended (optional, mostly for safety)
   b.ended = true
   b.outcome = 'win'
 }
 
-/** -------- Apply battle item effects -------- */
+/** Apply battle item effects */
 function applyBattleItem(kind: ItemKind) {
   const b = battle.value
   const p = playerAnimal.value
   if (!b || !p) return
 
-  // Consume first so you can't use items you don't have
   const ok = consumeItem(kind)
   if (!ok) {
     b.log.unshift('No item available.')
@@ -374,11 +472,10 @@ function applyBattleItem(kind: ItemKind) {
     return
   }
 
-  // If new kinds get added later:
   b.log.unshift('That item has no effect yet.')
 }
 
-/** -------- Main turn step (attack/defend) -------- */
+/** Main turn step */
 function stepTurn(playerMove: BattleMove) {
   const b = battle.value
   const p = playerAnimal.value
@@ -387,7 +484,6 @@ function stepTurn(playerMove: BattleMove) {
   if (isAnimating.value) return
 
   const enemyMove = enemyChooseMove(b.enemy)
-
   playAttackAnimation(playerMove, enemyMove)
 
   b.playerDefending = playerMove === 'defend'
@@ -401,7 +497,6 @@ function stepTurn(playerMove: BattleMove) {
     return
   }
 
-  // Player attacks (apply pill multiplier)
   if (playerMove === 'attack') {
     const effectiveAtk = Math.round(p.stats.attack * atkMult.value)
     const dmg = calcDamage(effectiveAtk, b.enemy.stats.defense, b.enemyDefending)
@@ -410,7 +505,6 @@ function stepTurn(playerMove: BattleMove) {
     flashEnemyHit()
   }
 
-  // Enemy dead?
   if (b.enemy.hpCurrent <= 0) {
     const stageReward = rewardForStage(b.stage)
     addGold(stageReward)
@@ -418,11 +512,8 @@ function stepTurn(playerMove: BattleMove) {
 
     b.log.unshift(`You defeated ${b.enemy.name}! +$${stageReward} (Run total: $${runGold.value})`)
 
-    // Stage 3 => run complete
     if (b.stage === 3) {
-      // ✅ fight ends => pills wear off
       resetBattleBuffs()
-
       healAnimalToFull(b.playerAnimalId)
       b.ended = true
       b.outcome = 'win'
@@ -431,10 +522,8 @@ function stepTurn(playerMove: BattleMove) {
       return
     }
 
-    // ✅ fight ends (stage 1 or 2) => pills wear off BEFORE next stage
     resetBattleBuffs()
 
-    // Stage 1 or 2 => show stage overlay with Continue/Drop Out
     stageOverlay.value = {
       stageCleared: b.stage,
       stageReward,
@@ -443,7 +532,6 @@ function stepTurn(playerMove: BattleMove) {
     return
   }
 
-  // Enemy attacks (apply defense pill multiplier)
   if (enemyMove === 'attack') {
     const effectiveDef = Math.round(p.stats.defense * defMult.value)
     const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
@@ -452,11 +540,8 @@ function stepTurn(playerMove: BattleMove) {
     flashPlayerHit()
   }
 
-  // Player dead?
   if (p.hpCurrent <= 0) {
-    // ✅ fight ends => pills wear off
     resetBattleBuffs()
-
     healAnimalToFull(b.playerAnimalId)
     b.ended = true
     b.outcome = 'loss'
@@ -468,9 +553,7 @@ function stepTurn(playerMove: BattleMove) {
   b.round++
 }
 
-/** -------- Turn step (use item) --------
- * Item use consumes your turn; enemy still acts.
- */
+/** Use item */
 function stepUseItem() {
   const b = battle.value
   const p = playerAnimal.value
@@ -480,19 +563,14 @@ function stepUseItem() {
   if (!selectedBattleItem.value) return
 
   const enemyMove = enemyChooseMove(b.enemy)
-
-  // item => player doesn't lunge; enemy might
   playAttackAnimation('item', enemyMove)
 
   b.playerDefending = false
   b.enemyDefending = enemyMove === 'defend'
 
   b.log.unshift(`Round ${b.round}: You used an item, enemy chose ${enemyMove.toUpperCase()}.`)
-
-  // Apply the item effect immediately
   applyBattleItem(selectedBattleItem.value)
 
-  // Enemy might still attack after you use item
   if (enemyMove === 'attack') {
     const effectiveDef = Math.round(p.stats.defense * defMult.value)
     const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
@@ -503,11 +581,8 @@ function stepUseItem() {
     b.log.unshift(`${b.enemy.name} defended.`)
   }
 
-  // Player dead?
   if (p.hpCurrent <= 0) {
-    // ✅ fight ends => pills wear off
     resetBattleBuffs()
-
     healAnimalToFull(b.playerAnimalId)
     b.ended = true
     b.outcome = 'loss'
@@ -525,6 +600,7 @@ function resetRun() {
   stageOverlay.value = null
   chosenId.value = null
   runGold.value = 0
+  runOpponents.value = []
   playerHit.value = false
   enemyHit.value = false
   playerAttacking.value = false
@@ -533,20 +609,53 @@ function resetRun() {
   clearAnimTimeout()
   resetBattleBuffs()
 }
+
+/** Pre-load opponents as soon as player exists */
+watchEffect(() => {
+  if (import.meta.client && player.value && !opponentsLoaded.value) {
+    loadOpponentsFromDb()
+  }
+})
 </script>
 
 <template>
   <section class="card">
-    <h1>Gauntlet</h1>
-    <p class="muted">Choose an animal and fight 3 boss battles. Each turn: Attack, Defend, or Use Item.</p>
+    <div class="topRow">
+      <h1>Gauntlet</h1>
+      <div class="muted small">API: {{ API_BASE || '(not set)' }}</div>
+    </div>
+
+    <p class="muted">
+      Choose an animal and fight 3 boss battles. Each turn: Attack, Defend, or Use Item.
+    </p>
+
+    <!-- If no player, don't blank out -->
+    <div v-if="!player" class="panel" style="margin-top: 12px;">
+      <b>No player found.</b>
+      <div class="muted small" style="margin-top:6px;">
+        Go to the Stable and create/select a player first.
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button class="btn primary" type="button" @click="navigateTo('/stable')">
+          Go to Stable
+        </button>
+      </div>
+    </div>
+
+    <!-- DB warning -->
+    <div v-else-if="opponentsLoadErr" class="panel warn" style="margin-top: 12px;">
+      <b>DB Warning:</b> {{ opponentsLoadErr }}
+      <div class="muted small">You can still play — enemies will be generated locally.</div>
+    </div>
 
     <!-- Choosing screen -->
-    <div v-if="choosing" class="panel">
+    <div v-if="player && choosing" class="panel" style="margin-top: 12px;">
       <h3>Choose Your Animal</h3>
 
       <div class="row">
         <button
-          v-for="a in player?.animals ?? []"
+          v-for="a in player.animals ?? []"
           :key="a.id"
           class="animalBtn"
           :class="{ active: a.id === chosenId }"
@@ -558,14 +667,22 @@ function resetRun() {
         </button>
       </div>
 
-      <button class="btn primary" :disabled="!chosenId" @click="startGauntlet" type="button">
-        Start Gauntlet
-      </button>
+      <div style="margin-top: 12px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn primary" :disabled="!chosenId" @click="startGauntlet" type="button">
+          Join the Fight
+        </button>
+        <button class="btn" type="button" @click="navigateTo('/stable')">
+          Back to Stable
+        </button>
+      </div>
+
+      <div v-if="(player.animals?.length ?? 0) === 0" class="muted small" style="margin-top: 10px;">
+        You don’t have any animals yet — go to the Stable to add one.
+      </div>
     </div>
 
     <!-- Battle screen -->
     <div v-else-if="battle && playerAnimal" class="battleLayout">
-      <!-- BattlePanel component -->
       <BattlePanel
         :battle="battle"
         :playerAnimal="playerAnimal"
@@ -584,10 +701,9 @@ function resetRun() {
         @defend="stepTurn('defend')"
         @useItem="stepUseItem"
         @reset="resetRun"
-        @update:selectedBattleItem="(val) => selectedBattleItem = val"
+        @update:selectedBattleItem="(val) => (selectedBattleItem = val)"
       />
 
-      <!-- BOTTOM: Battle log full width -->
       <div class="panel logPanel">
         <h3>Battle Log</h3>
         <div class="log">
@@ -596,7 +712,7 @@ function resetRun() {
       </div>
     </div>
 
-    <!-- Stage Win overlay (after stage 1 or 2) -->
+    <!-- Stage Win overlay -->
     <div v-if="stageOverlay" class="overlay" role="dialog" aria-modal="true">
       <div class="overlayCard">
         <div class="overlayTop">
@@ -658,6 +774,14 @@ function resetRun() {
   padding: 18px;
 }
 
+.topRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .muted { color: rgba(255, 255, 255, 0.70); }
 .small { font-size: 12px; }
 
@@ -666,6 +790,10 @@ function resetRun() {
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,.12);
   background: rgba(255,255,255,.04);
+}
+.panel.warn{
+  border-color: rgba(255, 200, 70, .25);
+  background: rgba(255, 200, 70, .06);
 }
 
 .row { display:flex; gap:14px; flex-wrap:wrap; margin-top:14px; }
@@ -707,35 +835,6 @@ function resetRun() {
 }
 .btn:disabled{ opacity:.5; cursor:not-allowed; }
 
-.actions{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top:12px;
-  align-items: center;
-}
-
-/* ✅ Item controls */
-.itemControls{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  align-items:center;
-}
-
-.select{
-  padding:10px 12px;
-  border-radius:14px;
-  border:1px solid rgba(255,255,255,.12);
-  background:rgba(0,0,0,.18);
-  color:rgba(255,255,255,.92);
-}
-
-.itemHint{
-  margin-top: 10px;
-}
-
-/* -------- layout -------- */
 .battleLayout{
   display: grid;
   gap: 14px;
@@ -759,7 +858,7 @@ function resetRun() {
   overflow-wrap: anywhere;
 }
 
-/* -------- Overlay modal -------- */
+/* Overlay modal */
 .overlay{
   position: fixed;
   inset: 0;
@@ -832,29 +931,16 @@ function resetRun() {
   flex-wrap:wrap;
 }
 
-/* Mobile overlay adjustments */
 @media (max-width: 420px){
-  .overlayCard{
-    width: 96vw;
-    padding: 14px;
-  }
+  .overlayCard{ width: 96vw; padding: 14px; }
+  .overlayImg{ width: 120px; height: 120px; }
+  .overlayHeadline{ font-size: 22px; }
+  .overlayActions{ gap: 8px; }
+  .overlayActions .btn{ flex: 1 1 140px; max-width: 100%; }
+}
 
-  .overlayImg{
-    width: 120px;
-    height: 120px;
-  }
-
-  .overlayHeadline{
-    font-size: 22px;
-  }
-
-  .overlayActions{
-    gap: 8px;
-  }
-
-  .overlayActions .btn{
-    flex: 1 1 140px;
-    max-width: 100%;
-  }
+@keyframes bob{
+  0%, 100%{ transform: translateY(0); }
+  50%{ transform: translateY(-6px); }
 }
 </style>

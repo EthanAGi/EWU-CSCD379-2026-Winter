@@ -1,19 +1,107 @@
 <script setup lang="ts">
 import AnimalFocusPanel from '~/components/AnimalFocusPanel.vue'
+import type { Animal, AnimalKind } from '../types/game'
 
 const { player } = usePlayerState()
 
+const config = useRuntimeConfig()
+const API_BASE =
+  ((config.public as any)?.apiBase as string | undefined)?.replace(/\/+$/, '') ||
+  'http://localhost:5072'
+
 /**
- * NOTE on "one-of-each type":
- * - Real enforcement should happen in usePlayerState.buyAnimal/chooseStarter.
- * - This page assumes player.animals is already unique by kind,
- *   but we still defensively de-dupe for display so it never breaks.
+ * ----------------------------
+ * DB DTOs (Assignment3.Api)
+ * ----------------------------
  */
-const allAnimals = computed(() => player.value?.animals ?? [])
+type PlayerAnimalDto = {
+  id: number
+  ownerPlayerId: string
+  ownerName: string
+  name: string
+  kind: AnimalKind
+  attack: number
+  defense: number
+  affection: number
+  level: number
+  hpMax: number
+  hpCurrent: number
+  createdAt: string
+  templateId: number
+}
+
+/**
+ * ----------------------------
+ * Stable state sourced from DB
+ * ----------------------------
+ */
+const dbAnimals = ref<Animal[]>([])
+const dbLoading = ref(false)
+const dbError = ref<string | null>(null)
+
+/** Redirect if no player */
+watchEffect(() => {
+  if (import.meta.client && !player.value) navigateTo('/')
+})
+
+function dtoToAnimal(a: PlayerAnimalDto): Animal {
+  return {
+    id: `pa-${a.id}`,
+    ownerPlayerId: a.ownerPlayerId,
+    ownerName: a.ownerName,
+    name: a.name,
+    kind: a.kind as any,
+    stats: {
+      attack: a.attack,
+      defense: a.defense,
+      affection: a.affection,
+      level: a.level,
+      hpMax: a.hpMax,
+    },
+    hpCurrent: a.hpCurrent,
+  }
+}
+
+/**
+ * Load player animals from DB:
+ * GET {API_BASE}/api/animals/player/{playerId}
+ */
+async function loadAnimalsFromDb() {
+  if (!player.value) return
+  dbLoading.value = true
+  dbError.value = null
+
+  try {
+    const url = `${API_BASE}/api/animals/player/${encodeURIComponent(player.value.id)}`
+    const rows = await $fetch<PlayerAnimalDto[]>(url)
+    const mapped = Array.isArray(rows) ? rows.map(dtoToAnimal) : []
+
+    dbAnimals.value = mapped
+
+    // Mirror into global state so other pages use DB animals
+    player.value.animals = mapped
+  } catch (e: any) {
+    console.error('Failed to load animals from DB:', e)
+    dbError.value = e?.message ?? 'Failed to load animals from DB.'
+    dbAnimals.value = player.value?.animals ?? []
+  } finally {
+    dbLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadAnimalsFromDb()
+})
+
+/**
+ * ----------------------------
+ * One-of-each kind (defensive)
+ * ----------------------------
+ */
 const animals = computed(() => {
   const seen = new Set<string>()
-  const out: typeof allAnimals.value = []
-  for (const a of allAnimals.value) {
+  const out: Animal[] = []
+  for (const a of dbAnimals.value) {
     if (seen.has(a.kind)) continue
     seen.add(a.kind)
     out.push(a)
@@ -21,23 +109,34 @@ const animals = computed(() => {
   return out
 })
 
-// Redirect if no player
-watchEffect(() => {
-  if (import.meta.client && !player.value) navigateTo('/')
-})
-
 /** ---------- Selection + “camera zoom” ---------- */
 const selectedId = ref<string | null>(null)
 const selected = computed(() => animals.value.find(a => a.id === selectedId.value) ?? null)
-
-// Is the “camera zoomed in”?
 const zoomed = ref(false)
 
-// We transform this “world” layer (camera)
 const worldRef = ref<HTMLElement | null>(null)
 const penRef = ref<HTMLElement | null>(null)
 
-// Sprite physics state
+/** Auto-select first animal */
+watchEffect(() => {
+  const first = animals.value[0]
+  if (!selectedId.value && first) selectedId.value = first.id
+})
+
+watchEffect(() => {
+  if (!selectedId.value) return
+  const ok = animals.value.some(a => a.id === selectedId.value)
+  if (!ok) {
+    selectedId.value = animals.value[0]?.id ?? null
+    zoomed.value = false
+  }
+})
+
+/**
+ * ----------------------------
+ * Sprite physics
+ * ----------------------------
+ */
 type SpriteState = {
   id: string
   x: number
@@ -53,10 +152,6 @@ const sprites = ref<SpriteState[]>([])
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min)
-}
-
-function spriteUrl(kind: string) {
-  return `/sprites/${kind}.png`
 }
 
 function ensureSpritesForAnimals() {
@@ -80,27 +175,10 @@ function ensureSpritesForAnimals() {
   sprites.value = Array.from(map.values()).filter(s => ids.has(s.id))
 }
 
-// Keep sprites synced
 watchEffect(() => {
   if (!import.meta.client) return
   if (!player.value) return
   ensureSpritesForAnimals()
-})
-
-// Auto-select first animal (so zoom works instantly)
-watchEffect(() => {
-  const first = animals.value[0]
-  if (!selectedId.value && first) selectedId.value = first.id
-})
-
-watchEffect(() => {
-  // If the selected animal disappears, clear selection and zoom
-  if (!selectedId.value) return
-  const ok = animals.value.some(a => a.id === selectedId.value)
-  if (!ok) {
-    selectedId.value = animals.value[0]?.id ?? null
-    zoomed.value = false
-  }
 })
 
 /** ---------- Movement loop ---------- */
@@ -120,17 +198,13 @@ function tick() {
   for (const s of sprites.value) {
     s.x += s.vx
     s.y += s.vy
-
-    // Soft drift
     s.vx += rand(-0.02, 0.02)
     s.vy += rand(-0.02, 0.02)
 
-    // Clamp
     const maxSpeed = 0.9
     s.vx = Math.max(-maxSpeed, Math.min(maxSpeed, s.vx))
     s.vy = Math.max(-maxSpeed, Math.min(maxSpeed, s.vy))
 
-    // Bounce
     if (s.x < PADDING) {
       s.x = PADDING
       s.vx *= -1
@@ -162,7 +236,7 @@ onBeforeUnmount(() => {
 })
 
 const animalsById = computed(() => {
-  const m = new Map<string, any>()
+  const m = new Map<string, Animal>()
   for (const a of animals.value) m.set(a.id, a)
   return m
 })
@@ -182,17 +256,16 @@ function resetCamera() {
 
 function zoomToSelected() {
   if (!selectedId.value) return
-  const pen = penRef.value
-  if (!pen) return
+  if (!penRef.value) return
   zoomed.value = true
 }
 
 /**
- * ---------- CAMERA CLAMPING ----------
- * We clamp the translate so the world never exposes "outside" the pen background.
+ * ----------------------------
+ * CAMERA CLAMPING
+ * ----------------------------
  */
 const ZOOM_SCALE = 2.0
-
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
@@ -209,21 +282,15 @@ const worldTransform = computed(() => {
   if (!s) return 'translate3d(0px,0px,0px) scale(1)'
 
   const scale = ZOOM_SCALE
-
-  // sprite center in world coords
   const targetX = s.x + SPRITE_SIZE / 2
   const targetY = s.y + SPRITE_SIZE / 2
-
-  // viewport center
   const viewCX = rect.width / 2
   const viewCY = rect.height / 2
 
-  // ideal translate
   let tx = viewCX - targetX * scale
   let ty = viewCY - targetY * scale
 
-  // clamp translate so we never move beyond edges
-  const minTx = rect.width - rect.width * scale // negative
+  const minTx = rect.width - rect.width * scale
   const maxTx = 0
   const minTy = rect.height - rect.height * scale
   const maxTy = 0
@@ -239,11 +306,9 @@ const worldTransform = computed(() => {
   <section class="page">
     <div class="stage">
       <div class="pen" ref="penRef">
-        <!-- Camera world -->
         <div class="world" ref="worldRef" :style="{ transform: worldTransform }">
           <div class="ground" />
 
-          <!-- Sprites -->
           <AnimalSprite
             v-for="s in sprites"
             :key="s.id"
@@ -254,35 +319,30 @@ const worldTransform = computed(() => {
           />
         </div>
 
-        <!-- Top HUD -->
         <div class="hud">
           <div class="hudLeft">
             <div class="title">Stable</div>
             <div class="subtitle muted">Click an animal to zoom and manage it.</div>
+            <div v-if="dbLoading" class="subtitle muted">Loading from DB…</div>
+            <div v-else-if="dbError" class="subtitle muted">DB load failed: {{ dbError }}</div>
           </div>
 
           <div class="hudRight">
             <NuxtLink class="hudBtn" to="/shop">Shop</NuxtLink>
             <NuxtLink class="hudBtn" to="/gauntlet">Gauntlet</NuxtLink>
-            <button v-if="zoomed" class="hudBtn" @click="resetCamera" type="button">Reset View</button>
+            <button v-if="zoomed" class="hudBtn" @click="resetCamera" type="button">
+              Reset View
+            </button>
           </div>
         </div>
 
+        <!-- Panel handles its own positioning now -->
         <AnimalFocusPanel
           v-if="zoomed && selected"
           :animal="selected"
           :player="player"
           @close="resetCamera"
-          @pet="() => {}"
-          @feed="() => {}"
         />
-
-
-
-
-
-
-
 
         <div v-if="!zoomed" class="bottomHint muted">
           No scroll. Background stays inside the centered pen.
@@ -293,47 +353,28 @@ const worldTransform = computed(() => {
 </template>
 
 <style scoped>
-/*
-  KEY FIX for your screenshot:
-  - DO NOT use 100vw here (it ignores your app container and causes horizontal misalignment)
-  - Instead, keep width:100% and center a max-width "stage" that matches the rest of your site.
-*/
+.page { width: 100%; }
+.stage { width: min(1200px, calc(100% - 32px)); margin: 0 auto; }
 
-.page {
-  width: 100%;
-}
-
-/* Centers the stable area to match your app’s centered layout */
-.stage {
-  width: min(1200px, calc(100% - 32px));
-  margin: 0 auto;
-}
-
-/* The pen is the bounded "background box" */
 .pen {
   position: relative;
   width: 100%;
-  /* Fill most of the visible viewport WITHOUT causing scroll.
-     Adjust the 140px if your app header is taller/shorter. */
   height: calc(100dvh - 140px);
   min-height: 520px;
   max-height: 780px;
-
-  overflow: hidden; /* ✅ everything stays inside border */
+  overflow: hidden;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
-
   background:
     radial-gradient(900px 420px at 30% 10%, rgba(124, 92, 255, 0.18), transparent 60%),
     radial-gradient(900px 420px at 80% 30%, rgba(53, 214, 197, 0.14), transparent 60%),
     url('/grass.jpg');
   background-size: auto, auto, cover;
-  background-position: center, center, center; /* ✅ centered background */
+  background-position: center, center, center;
   background-repeat: no-repeat, no-repeat, no-repeat;
 }
 
-/* subtle dark overlay */
 .pen::before {
   content: '';
   position: absolute;
@@ -343,7 +384,6 @@ const worldTransform = computed(() => {
   z-index: 0;
 }
 
-/* Camera world layer */
 .world {
   position: absolute;
   inset: 0;
@@ -363,99 +403,6 @@ const worldTransform = computed(() => {
   pointer-events: none;
 }
 
-/* VFX layers */
-.heartsLayer,
-.floatTextLayer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.heart {
-  position: absolute;
-  font-size: 18px;
-  line-height: 1;
-  color: rgba(255, 120, 170, 0.95);
-  text-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-  animation: floatHeart 900ms ease-out forwards;
-  user-select: none;
-}
-
-@keyframes floatHeart {
-  0% { transform: translate3d(0px, 0px, 0px) scale(0.9); opacity: 0; }
-  12% { opacity: 1; }
-  100% { transform: translate3d(var(--drift), -44px, 0px) scale(1.2); opacity: 0; }
-}
-
-.floatText {
-  position: absolute;
-  font-size: 14px;
-  font-weight: 1000;
-  letter-spacing: 0.2px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.18);
-  backdrop-filter: blur(6px);
-  text-shadow: 0 10px 26px rgba(0,0,0,0.40);
-  animation: floatText 950ms ease-out forwards;
-  user-select: none;
-  transform: translate3d(0,0,0);
-}
-
-.floatText.atk { color: rgba(255, 70, 90, 0.98); }
-.floatText.def { color: rgba(255, 214, 80, 0.98); }
-
-@keyframes floatText {
-  0% { transform: translate3d(0px, 6px, 0px) scale(0.95); opacity: 0; }
-  15% { opacity: 1; }
-  100% { transform: translate3d(var(--drift), -46px, 0px) scale(1.05); opacity: 0; }
-}
-
-/* Sprites */
-.spriteBtn {
-  position: absolute;
-  width: 64px;
-  height: 64px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.spriteBtn.selected::after {
-  content: '';
-  position: absolute;
-  inset: -6px;
-  border-radius: 18px;
-  border: 2px solid rgba(53, 214, 197, 0.85);
-  box-shadow: 0 0 0 6px rgba(53, 214, 197, 0.14);
-}
-
-.spriteFlip {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-}
-
-.spriteFlip.facingLeft { transform: scaleX(-1); }
-
-.spriteImg {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  user-select: none;
-  -webkit-user-drag: none;
-  animation: bob 1.8s ease-in-out infinite;
-}
-
-@keyframes bob {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-
-/* HUD */
 .hud {
   position: absolute;
   top: 14px;
@@ -476,7 +423,6 @@ const worldTransform = computed(() => {
   color: rgba(255, 255, 255, 0.96);
   letter-spacing: 0.3px;
 }
-
 .subtitle { margin-top: 4px; font-size: 12px; }
 
 .hudRight {
@@ -501,119 +447,7 @@ const worldTransform = computed(() => {
   backdrop-filter: blur(6px);
 }
 
-/* Panel */
-.panel {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: min(420px, calc(100% - 28px)); /* ✅ relative to pen, not viewport */
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(15, 18, 30, 0.86);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
-  padding: 14px;
-  z-index: 4;
-  backdrop-filter: blur(8px);
-}
-
-.panelTop {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: center;
-}
-
-.panelTitle {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-
-.tag {
-  font-size: 11px;
-  opacity: 0.85;
-  border: 1px solid rgba(255,255,255,0.14);
-  padding: 4px 8px;
-  border-radius: 999px;
-}
-
-.name {
-  font-weight: 1000;
-  font-size: 18px;
-  color: rgba(255,255,255,0.96);
-}
-
-.xBtn {
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.92);
-  border-radius: 12px;
-  width: 38px;
-  height: 38px;
-  cursor: pointer;
-}
-
 .muted { color: rgba(255, 255, 255, 0.72); }
-.small { font-size: 12px; }
-
-.stats {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-
-.stat {
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  font-size: 12px;
-}
-
-.actions {
-  margin-top: 12px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.btn {
-  border-radius: 14px;
-  padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.92);
-  cursor: pointer;
-}
-
-.btn.primary {
-  border: none;
-  background: linear-gradient(90deg, #7c5cff, #35d6c5);
-  color: #0b1020;
-  font-weight: 900;
-}
-
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.feedRow {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.select {
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.22);
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.hint { margin-top: 12px; font-size: 12px; }
 
 .bottomHint {
   position: absolute;

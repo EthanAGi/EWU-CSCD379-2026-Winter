@@ -8,7 +8,7 @@ export default defineNuxtConfig({
   // Avoid shipping devtools in production
   devtools: { enabled: process.env.NODE_ENV !== 'production' },
 
-  // Put runtime config here so Azure can inject values as environment variables.
+  // Runtime config allows Azure + local dev to inject environment variables
   runtimeConfig: {
     /**
      * Server-only values (NOT exposed to the browser).
@@ -18,32 +18,44 @@ export default defineNuxtConfig({
 
     /**
      * Public values (exposed to the browser).
+     *
      * Azure App Service → Configuration → Application settings:
      *   NUXT_PUBLIC_API_BASE = https://<your-api>.azurewebsites.net
      *
-     * In dev you can set:
-     *   NUXT_PUBLIC_API_BASE = http://localhost:5000
+     * Local development default:
+     *   http://localhost:5072
      */
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5000'
-    }
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072',
+    },
   },
 
   /**
    * Azure runs behind a proxy and terminates HTTPS before forwarding to your node app.
-   * This helps Nuxt generate correct absolute URLs (and not think it's http).
+   * This ensures Nuxt generates correct absolute URLs.
    */
   nitro: {
-    // Trust X-Forwarded-* headers set by Azure
-    routeRules: {},
+    /**
+     * OPTIONAL BUT STRONGLY RECOMMENDED:
+     * Proxy `/api/**` requests from Nuxt → .NET API.
+     *
+     * Result:
+     *   Browser → Nuxt (3000) → .NET API (5072)
+     *
+     * This avoids CORS entirely.
+     */
+    routeRules: {
+      '/api/**': {
+        proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:5072'}/api/**`,
+      },
+    },
   },
 
   /**
-   * These headers can be useful if you later add cookies/auth.
-   * Nuxt/Nitro generally handles this well, but keeping it explicit is nice.
+   * App-level configuration
    */
   app: {
     // If you later deploy under a sub-path, set baseURL here.
     // baseURL: '/'
-  }
+  },
 })

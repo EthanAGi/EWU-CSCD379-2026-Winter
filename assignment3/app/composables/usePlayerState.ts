@@ -24,7 +24,7 @@ function baseStats(kind: AnimalKind): Stats {
 function makeAnimal(owner: Player, kind: AnimalKind, customName?: string): Animal {
   const stats = baseStats(kind)
   return {
-    id: newId(),
+    id: newId(), // local id; if saved to DB, pages can replace with `pa-<dbId>` if desired
     ownerPlayerId: owner.id,
     ownerName: owner.name,
     name: customName ?? titleCase(kind),
@@ -34,6 +34,9 @@ function makeAnimal(owner: Player, kind: AnimalKind, customName?: string): Anima
   }
 }
 
+/* -------------------------------------------
+ * Shop data
+ * ------------------------------------------- */
 export function getShopItems(): Item[] {
   return [
     // -------------------
@@ -120,6 +123,9 @@ export function getAnimalPrices(): Record<AnimalKind, number> {
   }
 }
 
+/* -------------------------------------------
+ * localStorage helpers
+ * ------------------------------------------- */
 function load(): Player | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -134,8 +140,80 @@ function save(p: Player) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
 }
 
+/* -------------------------------------------
+ * Affection milestones (FIXED)
+ * - Every time affection crosses 5, 10, 15, ...
+ *   increase stats reliably.
+ * - Handles Treat +5 crossing multiple milestones.
+ * ------------------------------------------- */
+function applyAffectionMilestones(animal: Animal, beforeAff: number, afterAff: number) {
+  const beforeMilestones = Math.floor(beforeAff / 5)
+  const afterMilestones = Math.floor(afterAff / 5)
+  const gained = afterMilestones - beforeMilestones
+  if (gained <= 0) return
+
+  // Deterministic gains (no randomness = no “sometimes doesn’t work” bug)
+  animal.stats.attack += gained
+  animal.stats.defense += gained
+  animal.stats.hpMax += gained * 2
+
+  // Keep current HP in a safe range; optionally “heal” by the hpMax gain.
+  animal.hpCurrent = Math.min(animal.stats.hpMax, animal.hpCurrent + gained * 2)
+}
+
+/* -------------------------------------------
+ * DB DTOs + helpers
+ * ------------------------------------------- */
+type PlayerAnimalDto = {
+  id: number
+  ownerPlayerId: string
+  ownerName: string
+  name: string
+  kind: AnimalKind
+  attack: number
+  defense: number
+  affection: number
+  level: number
+  hpMax: number
+  hpCurrent: number
+  createdAt: string
+  templateId: number
+}
+
+function dtoToAnimal(a: PlayerAnimalDto): Animal {
+  return {
+    id: `pa-${a.id}`, // stable id for linking to DB row
+    ownerPlayerId: a.ownerPlayerId,
+    ownerName: a.ownerName,
+    name: a.name,
+    kind: a.kind,
+    stats: {
+      attack: a.attack,
+      defense: a.defense,
+      affection: a.affection,
+      level: a.level,
+      hpMax: a.hpMax,
+    },
+    hpCurrent: a.hpCurrent,
+  }
+}
+
+function animalIdToDbId(id: string): number | null {
+  if (!id.startsWith('pa-')) return null
+  const n = Number(id.slice(3))
+  return Number.isFinite(n) ? n : null
+}
+
 export function usePlayerState() {
   const player = useState<Player | null>('player', () => null)
+
+  // ✅ pull API base from runtimeConfig so all pages share the same config
+  const config = useRuntimeConfig()
+  const apiBase = computed(() => {
+    const raw = (config.public as any)?.apiBase as string | undefined
+    const base = (raw ?? 'http://localhost:5072').replace(/\/+$/, '')
+    return base
+  })
 
   onMounted(() => {
     if (import.meta.client && player.value === null) {
@@ -151,7 +229,6 @@ export function usePlayerState() {
       name: name.trim(),
       gold: 0,
       animals: [],
-      // ✅ include ALL item kinds so TS + runtime are happy
       inventory: {
         treat: 0,
         armorSnack: 0,
@@ -216,7 +293,13 @@ export function usePlayerState() {
     if (!player.value) return
     const a = player.value.animals.find(x => x.id === animalId)
     if (!a) return
-    a.stats.affection = Math.min(50, a.stats.affection + 1) // ✅ cap 50 (logic for +2 atk/def on thresholds can be added next)
+
+    const before = a.stats.affection
+    const after = Math.min(50, before + 1)
+
+    a.stats.affection = after
+    applyAffectionMilestones(a, before, after)
+
     save(player.value)
   }
 
@@ -224,21 +307,23 @@ export function usePlayerState() {
     if (!player.value) return
     const a = player.value.animals.find(x => x.id === animalId)
     if (!a) return
+    if (!itemKind) return // ✅ no more free/basic feed
 
-    // basic feed: no hunger mechanic anymore, so it does nothing unless an item is used
+    const inv = player.value.inventory[itemKind] ?? 0
+    if (inv <= 0) return
+    player.value.inventory[itemKind] = inv - 1
 
-    if (itemKind) {
-      const inv = player.value.inventory[itemKind] ?? 0
-      if (inv <= 0) return
-      player.value.inventory[itemKind] = inv - 1
+    const item = getShopItems().find(i => i.kind === itemKind)
 
-      const item = getShopItems().find(i => i.kind === itemKind)
+    // Only apply “growth” style stat changes here.
+    if (item?.effect.attack) a.stats.attack += item.effect.attack
+    if (item?.effect.defense) a.stats.defense += item.effect.defense
 
-      // Only apply “growth” style stat changes here.
-      // (Battle items will be applied in gauntlet later.)
-      if (item?.effect.attack) a.stats.attack += item.effect.attack
-      if (item?.effect.defense) a.stats.defense += item.effect.defense
-      if (item?.effect.affection) a.stats.affection = Math.min(50, a.stats.affection + item.effect.affection)
+    if (item?.effect.affection) {
+      const before = a.stats.affection
+      const after = Math.min(50, before + item.effect.affection)
+      a.stats.affection = after
+      applyAffectionMilestones(a, before, after)
     }
 
     save(player.value)
@@ -252,9 +337,73 @@ export function usePlayerState() {
     save(player.value)
   }
 
+  /* -------------------------------------------
+   * ✅ DB functions (so the rest of your site can stay consistent)
+   * Pages can call these to:
+   * - load animals from DB
+   * - claim an animal in DB
+   * - update an animal row when stats change
+   * ------------------------------------------- */
+
+  async function dbLoadPlayerAnimals(playerId: string): Promise<Animal[]> {
+    const url = `${apiBase.value}/api/animals/player/${encodeURIComponent(playerId)}`
+    const rows = await $fetch<PlayerAnimalDto[]>(url)
+    return Array.isArray(rows) ? rows.map(dtoToAnimal) : []
+  }
+
+  async function dbClaimAnimal(kind: AnimalKind, customName?: string): Promise<Animal | null> {
+    if (!player.value) return null
+
+    const url = `${apiBase.value}/api/animals/claim`
+    const created = await $fetch<PlayerAnimalDto>(url, {
+      method: 'POST',
+      body: {
+        ownerPlayerId: player.value.id,
+        ownerName: player.value.name,
+        kind,
+        name: customName ?? `${player.value.name}'s ${titleCase(kind)}`,
+      },
+    })
+
+    if (!created || typeof created.id !== 'number') return null
+    return dtoToAnimal(created)
+  }
+
+  /**
+   * IMPORTANT:
+   * You need a real endpoint to update a PlayerAnimal row.
+   * Change this route if your controller uses a different one.
+   *
+   * Example expected endpoint:
+   *   PUT /api/animals/playerAnimal/{id}
+   */
+  async function dbUpdatePlayerAnimal(animal: Animal): Promise<boolean> {
+    const dbId = animalIdToDbId(animal.id)
+    if (!dbId) return false
+
+    const url = `${apiBase.value}/api/animals/playerAnimal/${dbId}`
+    await $fetch(url, {
+      method: 'PUT',
+      body: {
+        // Keep the body aligned with your DB row
+        name: animal.name,
+        kind: animal.kind,
+        attack: animal.stats.attack,
+        defense: animal.stats.defense,
+        affection: animal.stats.affection,
+        level: animal.stats.level,
+        hpMax: animal.stats.hpMax,
+        hpCurrent: animal.hpCurrent,
+      },
+    })
+    return true
+  }
+
   return {
     player,
     isReady,
+
+    // local state actions
     createPlayer,
     chooseStarter,
     addGold,
@@ -263,5 +412,11 @@ export function usePlayerState() {
     petAnimal,
     feedAnimal,
     healAnimalToFull,
+
+    // ✅ DB helpers
+    apiBase,
+    dbLoadPlayerAnimals,
+    dbClaimAnimal,
+    dbUpdatePlayerAnimal,
   }
 }
