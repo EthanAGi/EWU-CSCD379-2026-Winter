@@ -140,6 +140,14 @@ function save(p: Player) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
 }
 
+function clearSaved() {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 /* -------------------------------------------
  * Affection milestones (FIXED)
  * ------------------------------------------- */
@@ -227,6 +235,18 @@ export function usePlayerState() {
     }
     player.value = p
     save(p)
+  }
+
+  /**
+   * ✅ NEW:
+   * Hard reset of the local player + persisted storage.
+   * Use this when you want to force the user back through starter flow.
+   */
+  function resetPlayer() {
+    player.value = null
+    if (import.meta.client) {
+      clearSaved()
+    }
   }
 
   function chooseStarter(kind: AnimalKind) {
@@ -380,6 +400,7 @@ export function usePlayerState() {
 
     // local state actions
     createPlayer,
+    resetPlayer, // ✅ added
     chooseStarter,
     addGold,
     buyItem,

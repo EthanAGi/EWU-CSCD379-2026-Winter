@@ -115,7 +115,7 @@ function vfxForAffectionMilestones(before: number, after: number) {
 type GrowthKind = 'treat' | 'armorSnack' | 'proteinBite'
 const growthOptions = [
   { label: 'None', value: '' },
-  { label: 'Treat (+5 AFF)', value: 'treat' },          // ✅ matches composable/shop data
+  { label: 'Treat (+5 AFF)', value: 'treat' },
   { label: 'Armor Snack (+DEF)', value: 'armorSnack' },
   { label: 'Protein Bite (+ATK)', value: 'proteinBite' },
 ] as const
@@ -131,98 +131,6 @@ const canUseSelected = computed(() => {
   if (!k) return false
   return invCount(k) > 0
 })
-
-/* ------------------------------
- * FOLLOW PANEL (camera/overlay)
- * ------------------------------ */
-const panelRef = ref<HTMLElement | null>(null)
-const xPx = ref(0)
-const yPx = ref(0)
-
-let followRaf: number | null = null
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
-}
-
-function findPenEl(): HTMLElement | null {
-  const root = panelRef.value?.parentElement
-  return (root?.closest?.('.pen') as HTMLElement | null) ?? null
-}
-
-function findSelectedSpriteEl(): HTMLElement | null {
-  const pen = findPenEl()
-  if (!pen) return null
-  return pen.querySelector('.spriteBtn.selected') as HTMLElement | null
-}
-
-function setPanelToFollow() {
-  const pen = findPenEl()
-  const spriteEl = findSelectedSpriteEl()
-  const panelEl = panelRef.value
-  if (!pen || !spriteEl || !panelEl) return
-
-  const penRect = pen.getBoundingClientRect()
-  const spRect = spriteEl.getBoundingClientRect()
-
-  const desiredLeft = spRect.right - penRect.left + 12
-  const desiredTop = spRect.top - penRect.top - 6
-
-  const panelW = panelEl.offsetWidth || 360
-  const panelH = panelEl.offsetHeight || 220
-
-  const minLeft = 12
-  const minTop = 12
-  const maxLeft = Math.max(minLeft, penRect.width - panelW - 12)
-  const maxTop = Math.max(minTop, penRect.height - panelH - 12)
-
-  xPx.value = clamp(desiredLeft, minLeft, maxLeft)
-  yPx.value = clamp(desiredTop, minTop, maxTop)
-}
-
-function followLoop() {
-  setPanelToFollow()
-  followRaf = requestAnimationFrame(followLoop)
-}
-
-function startFollow() {
-  if (followRaf !== null) cancelAnimationFrame(followRaf)
-  followRaf = requestAnimationFrame(followLoop)
-}
-
-function stopFollow() {
-  if (followRaf !== null) cancelAnimationFrame(followRaf)
-  followRaf = null
-}
-
-/* ---- window resize listener (NO VueUse) ---- */
-function onResize() {
-  setPanelToFollow()
-}
-let resizeBound = false
-
-onMounted(() => {
-  startFollow()
-
-  if (import.meta.client && !resizeBound) {
-    window.addEventListener('resize', onResize, { passive: true })
-    resizeBound = true
-  }
-
-  nextTick(() => setPanelToFollow())
-})
-
-watch(
-  () => props.animal?.id,
-  () => {
-    nextTick(() => setPanelToFollow())
-  }
-)
-
-watch(
-  () => panelRef.value,
-  () => nextTick(() => setPanelToFollow())
-)
 
 /* ------------------------------
  * Actions
@@ -267,17 +175,12 @@ function doUseGrowth() {
 
 onBeforeUnmount(() => {
   if (nowRaf !== null) cancelAnimationFrame(nowRaf)
-  stopFollow()
-
-  if (import.meta.client && resizeBound) {
-    window.removeEventListener('resize', onResize)
-    resizeBound = false
-  }
 })
 </script>
 
 <template>
-  <div ref="panelRef" class="panel" :style="{ left: xPx + 'px', top: yPx + 'px' }">
+  <!-- Corner-anchored panel (no sprite-following) -->
+  <div class="panel" role="dialog" aria-label="Animal focus">
     <div class="panelTop">
       <div class="panelTitle">
         <span class="tag">{{ animal.kind.toUpperCase() }}</span>
@@ -342,9 +245,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* IMPORTANT:
+   This component is rendered inside your .pen (which is position: relative).
+   So absolute positioning anchors it to the pen corner. */
 .panel {
   position: absolute;
   z-index: 10;
+
+  /* ✅ corner placement */
+  top: 14px;
+  right: 14px;
 
   width: min(420px, calc(100% - 28px));
   border-radius: 18px;
@@ -507,5 +417,15 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* Small screens: pin it lower so it doesn't cover HUD at the top */
+@media (max-width: 520px) {
+  .panel {
+    top: 62px; /* below your Stable HUD area */
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
 }
 </style>

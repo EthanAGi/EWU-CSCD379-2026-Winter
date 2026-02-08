@@ -2,7 +2,7 @@
 import AnimalFocusPanel from '~/components/AnimalFocusPanel.vue'
 import type { Animal, AnimalKind } from '../types/game'
 
-const { player } = usePlayerState()
+const { player, resetPlayer } = usePlayerState()
 
 /**
  * ----------------------------
@@ -36,14 +36,13 @@ const dbError = ref<string | null>(null)
 
 /**
  * ----------------------------
- * Starter fallback (empty stable)
+ * Empty-player reset behavior
  * ----------------------------
+ * If player exists but has NO animals after a successful DB load,
+ * wipe the local player and send them back to "/" so the starter flow runs.
  */
-const needsStarter = ref(false)
-const starterBusy = ref(false)
-const starterError = ref<string | null>(null)
-
-const stableIsEmpty = computed(() => !dbLoading.value && !dbError.value && dbAnimals.value.length === 0)
+const attemptedReset = ref(false)
+const emptyAfterDbLoad = computed(() => !dbLoading.value && !dbError.value && dbAnimals.value.length === 0)
 
 /** Redirect if no player */
 watchEffect(() => {
@@ -71,10 +70,6 @@ function dtoToAnimal(a: PlayerAnimalDto): Animal {
 /**
  * Load player animals from DB (same-origin Nitro route):
  * GET /api/animals/player/{playerId}
- *
- * ✅ IMPORTANT:
- * On Azure App Service (Nuxt + Nitro), always call SAME-ORIGIN /api/... routes.
- * The server route talks to SQL; the browser never hits localhost and CORS is avoided.
  */
 async function loadAnimalsFromDb() {
   if (!player.value) return
@@ -93,15 +88,19 @@ async function loadAnimalsFromDb() {
       player.value.animals = mapped
     }
 
-    // ✅ If stable is empty after a successful load, show starter prompt
-    needsStarter.value = mapped.length === 0
+    /**
+     * ✅ If DB load succeeded and user has 0 animals, wipe local player and force starter flow.
+     */
+    if (mapped.length === 0 && !attemptedReset.value) {
+      attemptedReset.value = true
+      resetPlayer()
+      navigateTo('/')
+      return
+    }
   } catch (e: any) {
     console.error('Failed to load animals from DB:', e)
     dbError.value = e?.message ?? 'Failed to load animals from DB.'
     dbAnimals.value = player.value?.animals ?? []
-
-    // Don’t force starter if DB failed; user can retry load
-    needsStarter.value = false
   } finally {
     dbLoading.value = false
   }
@@ -110,33 +109,6 @@ async function loadAnimalsFromDb() {
 onMounted(() => {
   loadAnimalsFromDb()
 })
-
-/**
- * Give the player a starter via a Nitro route you implement server-side.
- * Suggested: POST /api/animals/starter
- * Body: { playerId: string }
- */
-async function chooseStarter() {
-  if (!player.value) return
-  starterBusy.value = true
-  starterError.value = null
-
-  try {
-    await $fetch('/api/animals/starter', {
-      method: 'POST',
-      body: { playerId: player.value.id },
-    })
-
-    // Reload from DB so the stable populates
-    await loadAnimalsFromDb()
-    needsStarter.value = false
-  } catch (e: any) {
-    console.error('Failed to grant starter:', e)
-    starterError.value = e?.message ?? 'Failed to grant starter.'
-  } finally {
-    starterBusy.value = false
-  }
-}
 
 /**
  * ----------------------------
@@ -370,47 +342,19 @@ const worldTransform = computed(() => {
             <div class="subtitle muted">Click an animal to zoom and manage it.</div>
             <div v-if="dbLoading" class="subtitle muted">Loading from DB…</div>
             <div v-else-if="dbError" class="subtitle muted">DB load failed: {{ dbError }}</div>
-            <div v-else-if="stableIsEmpty" class="subtitle muted">Your stable is empty.</div>
+            <div v-else-if="emptyAfterDbLoad" class="subtitle muted">
+              Stable empty — resetting player to starter flow…
+            </div>
           </div>
 
           <div class="hudRight">
-            <NuxtLink class="hudBtn" to="/shop">Shop</NuxtLink>
-            <NuxtLink class="hudBtn" to="/gauntlet">Gauntlet</NuxtLink>
             <button v-if="zoomed" class="hudBtn" @click="resetCamera" type="button">
               Reset View
             </button>
           </div>
         </div>
 
-        <!-- Starter prompt overlay -->
-        <div v-if="needsStarter" class="starterOverlay" role="dialog" aria-modal="true">
-          <div class="starterCard">
-            <div class="starterTitle">Choose a starter</div>
-            <div class="starterText muted">
-              Your stable is empty. Let’s get you started with a companion.
-            </div>
-
-            <div v-if="starterError" class="starterText muted" style="margin-top: 8px;">
-              {{ starterError }}
-            </div>
-
-            <div class="starterActions">
-              <button class="hudBtn" type="button" :disabled="starterBusy" @click="chooseStarter">
-                {{ starterBusy ? 'Granting…' : 'Get Starter' }}
-              </button>
-
-              <button class="hudBtn" type="button" :disabled="starterBusy" @click="loadAnimalsFromDb">
-                Retry Load
-              </button>
-            </div>
-          </div>
-        </div>
-
         <AnimalFocusPanel v-if="zoomed && selected" :animal="selected" :player="player" @close="resetCamera" />
-
-        <div v-if="!zoomed" class="bottomHint muted">
-          No scroll. Background stays inside the centered pen.
-        </div>
       </div>
     </div>
   </section>
@@ -512,57 +456,4 @@ const worldTransform = computed(() => {
 }
 
 .muted { color: rgba(255, 255, 255, 0.72); }
-
-.bottomHint {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 3;
-  font-size: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.22);
-  padding: 8px 10px;
-  border-radius: 14px;
-  backdrop-filter: blur(6px);
-}
-
-/* Starter overlay */
-.starterOverlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
-}
-
-.starterCard {
-  width: min(520px, 100%);
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
-  padding: 18px;
-}
-
-.starterTitle {
-  font-weight: 900;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.96);
-}
-
-.starterText {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.starterActions {
-  margin-top: 14px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 </style>
