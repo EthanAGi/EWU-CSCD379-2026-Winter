@@ -101,7 +101,7 @@ onMounted(loadReviews)
       <div class="topRow">
         <div>
           <h1 class="title">Reviews</h1>
-          <p class="muted">What players think about your game.</p>
+          <p class="muted">Please, give me some feedback!.</p>
         </div>
       </div>
 

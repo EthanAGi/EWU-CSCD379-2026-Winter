@@ -182,7 +182,7 @@ async function onBuyAnimal(kind: AnimalKind) {
 <template>
   <section class="card">
     <h1>Shop</h1>
-    <p class="muted">Buy items to feed your animals, or save up for rare animals.</p>
+    <p class="muted">Purchase growth items to enhance your animals. Battle items are useable in combat.</p>
 
     <div class="pill" v-if="player">💰 Gold: {{ player.gold }}</div>
     <div class="pill" v-else>Loading player…</div>

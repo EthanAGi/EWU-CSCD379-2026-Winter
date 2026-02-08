@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AnimalKind } from '../types/game'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, type RouteLocationNormalized } from 'vue-router'
 
 const { player, createPlayer, chooseStarter, addGold } = usePlayerState()
 
@@ -35,32 +35,39 @@ const starterMsg = ref<string | null>(null)
  * ----------------------------
  * Leave warning (during starter save)
  * ----------------------------
- * If a user tries to navigate away while we are saving the starter to the DB,
- * warn them that progress may be lost.
  */
 const leaveModalOpen = ref(false)
-const leavePendingNav = ref<null | (() => void)>(null)
-
+const pendingTo = ref<RouteLocationNormalized | null>(null)
 const isSaving = computed(() => savingStarter.value !== null)
 
-onBeforeRouteLeave((_to, _from, next) => {
+onBeforeRouteLeave((to, from, next) => {
+  // If not saving, allow navigation
   if (!isSaving.value) return next()
 
+  // If route isn't actually changing, allow
+  if (to.fullPath === from.fullPath) return next()
+
+  // Block and show modal
   leaveModalOpen.value = true
-  leavePendingNav.value = () => next()
+  pendingTo.value = to
   next(false)
 })
 
 function stayOnPage() {
   leaveModalOpen.value = false
-  leavePendingNav.value = null
+  pendingTo.value = null
 }
 
-function leaveAnyway() {
-  const go = leavePendingNav.value
+async function leaveAnyway() {
+  const to = pendingTo.value
   leaveModalOpen.value = false
-  leavePendingNav.value = null
-  if (go) go()
+  pendingTo.value = null
+
+  // We ARE choosing to leave while saving; let it proceed.
+  // Use navigateTo so Nuxt handles it correctly.
+  if (to) {
+    await navigateTo(to.fullPath)
+  }
 }
 
 /** Browser refresh/close warning while saving (best-effort) */
@@ -83,21 +90,15 @@ onBeforeUnmount(() => {
 async function pickStarter(kind: AnimalKind) {
   starterMsg.value = null
 
-  // Need player before doing anything
   const p = player.value
   if (!p) return
 
-  // Snapshot state for rollback if DB fails
   const prevGold = p.gold
   const prevAnimals = [...p.animals]
 
-  // 1) local save: adds starter animal to local state
   chooseStarter(kind)
-
-  // 2) give starter bonus gold
   addGold(300)
 
-  // 3) persist to DB via Nuxt server route (same-origin)
   savingStarter.value = kind
   try {
     await $fetch(`/api/animals/claim`, {
@@ -113,7 +114,6 @@ async function pickStarter(kind: AnimalKind) {
 
     starterMsg.value = 'Starter saved to DB ✅'
   } catch (e: any) {
-    // ✅ Roll back local state if DB save fails
     p.gold = prevGold
     p.animals = prevAnimals
 
@@ -254,7 +254,7 @@ async function pickStarter(kind: AnimalKind) {
   font-weight:900;
 }
 
-/* Modal overlay (reuses your style language) */
+/* Modal overlay */
 .overlay{
   position: fixed;
   inset: 0;
