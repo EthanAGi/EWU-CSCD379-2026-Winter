@@ -12,6 +12,16 @@ type BgmState = {
 
   // Remember which specific track was chosen for each zone
   chosenTrackByZone: Record<'stable' | 'gauntlet', string | null>
+
+  // ✅ Master volume (0..1) controlled by slider
+  volume: number
+
+  // ✅ Per-audio crossfade mix (0..1); final audio.volume = mix[i] * volume
+  mix: [number, number]
+
+  // ✅ Per-zone soundtrack cycling state
+  orderByZone: Record<'stable' | 'gauntlet', string[]>
+  indexByZone: Record<'stable' | 'gauntlet', number>
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -20,18 +30,7 @@ function clamp(n: number, min: number, max: number) {
 
 /**
  * ✅ Playlists:
- * Add/remove mp3 files here when you drop songs into /public/audio/<zone>/
- *
  * Paths are from /public, so they start with /audio/...
- *
- * YOUR CURRENT FILES (from your screenshot):
- * /public/audio/gauntlet/
- *   - God.mp3
- *   - Homeward.mp3
- *   - Metaphor.mp3
- *   - Royal.mp3
- *
- * If you also have stable tracks, add them in the stable list below.
  */
 const PLAYLISTS: Record<'stable' | 'gauntlet', string[]> = {
   stable: [
@@ -47,17 +46,22 @@ const PLAYLISTS: Record<'stable' | 'gauntlet', string[]> = {
   ],
 }
 
-function pickRandom(list: string[], avoid?: string | null): string | null {
-  if (!list || list.length === 0) return null
-  if (list.length === 1) return list[0]!
-
-  // Try to pick something different than the currently playing track for that zone
-  for (let tries = 0; tries < 6; tries++) {
-    const candidate = list[Math.floor(Math.random() * list.length)]!
-    if (!avoid || candidate !== avoid) return candidate
+function shuffle<T>(arr: readonly T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = a[i]!     // indices are guaranteed in-range here
+    a[i] = a[j]!
+    a[j] = tmp
   }
-  // Fallback
-  return list[Math.floor(Math.random() * list.length)]!
+  return a
+}
+
+
+function sameHref(a: HTMLAudioElement, track: string) {
+  // audio.src becomes absolute; compare against absolute URL
+  const abs = new URL(track, window.location.href).href
+  return a.src === abs
 }
 
 export function useBgm() {
@@ -71,9 +75,101 @@ export function useBgm() {
       stable: null,
       gauntlet: null,
     },
+
+    volume: 0.6,
+    mix: [0, 0],
+
+    // cycling state
+    orderByZone: { stable: [], gauntlet: [] },
+    indexByZone: { stable: 0, gauntlet: 0 },
   }))
 
   const audios = useState<(HTMLAudioElement | null)[]>('bgm_audios_v1', () => [null, null])
+  const listenersAttached = useState<boolean>('bgm_listeners_v1', () => false)
+
+  function applyVolumes() {
+    if (!import.meta.client) return
+    const a0 = audios.value[0]
+    const a1 = audios.value[1]
+    if (!a0 || !a1) return
+
+    const master = clamp(state.value.volume, 0, 1)
+    a0.volume = clamp(state.value.mix[0], 0, 1) * master
+    a1.volume = clamp(state.value.mix[1], 0, 1) * master
+  }
+
+  function buildCycle(zone: Exclude<BgmZone, null>, preferFirst?: string | null) {
+    const list = PLAYLISTS[zone] ?? []
+    if (list.length === 0) {
+      state.value.orderByZone[zone] = []
+      state.value.indexByZone[zone] = 0
+      state.value.chosenTrackByZone[zone] = null
+      return
+    }
+
+    // New cycle = shuffled playlist (so you still "cycle all tracks" but not always same order)
+    let order = shuffle(list)
+
+    // Try to avoid immediate repeat across cycles:
+    // if preferFirst is the first track after shuffle, rotate once.
+    if (preferFirst && order.length > 1 && order[0] === preferFirst) {
+      order = [...order.slice(1), order[0]]
+    }
+
+    // If caller wants a particular track to be current, rotate so it becomes first.
+    if (preferFirst) {
+      const idx = order.indexOf(preferFirst)
+      if (idx >= 0) {
+        order = [...order.slice(idx), ...order.slice(0, idx)]
+      }
+    }
+
+    state.value.orderByZone[zone] = order
+    state.value.indexByZone[zone] = 0
+    state.value.chosenTrackByZone[zone] = order[0] ?? null
+  }
+
+  function getCurrentTrack(zone: Exclude<BgmZone, null>): string | null {
+    const order = state.value.orderByZone[zone]
+    if (!order || order.length === 0) {
+      // If we had a remembered track, start cycle with it; otherwise random cycle
+      buildCycle(zone, state.value.chosenTrackByZone[zone])
+    }
+    const order2 = state.value.orderByZone[zone]
+    if (!order2 || order2.length === 0) return null
+    const i = clamp(state.value.indexByZone[zone], 0, order2.length - 1)
+    state.value.indexByZone[zone] = i
+    const t = order2[i] ?? null
+    state.value.chosenTrackByZone[zone] = t
+    return t
+  }
+
+  function advanceToNextTrack(zone: Exclude<BgmZone, null>): string | null {
+    const order = state.value.orderByZone[zone]
+    if (!order || order.length === 0) {
+      buildCycle(zone, null)
+    }
+
+    const order2 = state.value.orderByZone[zone]
+    if (!order2 || order2.length === 0) return null
+
+    const prev = state.value.chosenTrackByZone[zone] ?? null
+    let nextIndex = state.value.indexByZone[zone] + 1
+
+    // End of cycle -> start a NEW cycle (loop the soundtrack)
+    if (nextIndex >= order2.length) {
+      buildCycle(zone, prev) // new shuffled cycle, avoid immediate repeat
+      const t = state.value.orderByZone[zone][0] ?? null
+      state.value.indexByZone[zone] = 0
+      state.value.chosenTrackByZone[zone] = t
+      return t
+    }
+
+    state.value.indexByZone[zone] = nextIndex
+    const t = order2[nextIndex] ?? null
+    state.value.chosenTrackByZone[zone] = t
+    return t
+  }
 
   function ensureAudioElements() {
     if (!import.meta.client) return
@@ -83,12 +179,56 @@ export function useBgm() {
     const a1 = new Audio()
 
     for (const a of [a0, a1]) {
-      a.loop = true
+      a.loop = false // ✅ IMPORTANT: we handle advancing ourselves
       a.preload = 'auto'
       a.volume = 0
     }
 
     audios.value = [a0, a1]
+
+    // Attach ended listeners once
+    if (!listenersAttached.value) {
+      listenersAttached.value = true
+
+      const onEnded = async (endedIndex: 0 | 1) => {
+        if (!import.meta.client) return
+        if (!state.value.enabled) return
+        if (state.value.switching) return
+        const zone = state.value.currentZone
+        if (!zone) return
+
+        // Only advance if the ended audio is the currently active one.
+        if (state.value.aIndex !== endedIndex) return
+
+        const a = audios.value[endedIndex]
+        if (!a) return
+
+        const next = advanceToNextTrack(zone)
+        if (!next) return
+
+        // Swap src to next track and play
+        if (!sameHref(a, next)) {
+          a.src = next
+          a.currentTime = 0
+        }
+
+        // Keep this element as "active" (mix 1), other stays 0
+        state.value.mix[endedIndex] = 1
+        state.value.mix[endedIndex === 0 ? 1 : 0] = 0
+        applyVolumes()
+
+        try {
+          await a.play()
+        } catch {
+          // If browser blocks it, user gesture will unlock again via initOnce()
+        }
+      }
+
+      a0.addEventListener('ended', () => void onEnded(0))
+      a1.addEventListener('ended', () => void onEnded(1))
+    }
+
+    applyVolumes()
   }
 
   /**
@@ -116,6 +256,43 @@ export function useBgm() {
     window.addEventListener('keydown', unlock, { once: true })
   }
 
+  function fadeMixTo(index: 0 | 1, targetMix: number, ms: number, pauseAtEnd = false) {
+    targetMix = clamp(targetMix, 0, 1)
+    const a = audios.value[index]
+    if (!a) return
+
+    const startMix = state.value.mix[index]
+    const start = performance.now()
+    const dur = Math.max(1, ms)
+
+    const tick = () => {
+      const t = (performance.now() - start) / dur
+      const k = clamp(t, 0, 1)
+
+      const mixNow = startMix + (targetMix - startMix) * k
+      state.value.mix[index] = mixNow
+      applyVolumes()
+
+      if (k < 1) {
+        requestAnimationFrame(tick)
+      } else {
+        state.value.mix[index] = targetMix
+        applyVolumes()
+
+        if (pauseAtEnd && targetMix === 0) {
+          try {
+            a.pause()
+            a.currentTime = 0
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    requestAnimationFrame(tick)
+  }
+
   function setEnabled(on: boolean) {
     state.value.enabled = on
     if (!import.meta.client) return
@@ -126,8 +303,8 @@ export function useBgm() {
     if (!a0 || !a1) return
 
     if (!on) {
-      fadeTo(a0, 0, 250, true)
-      fadeTo(a1, 0, 250, true)
+      fadeMixTo(0, 0, 250, true)
+      fadeMixTo(1, 0, 250, true)
       return
     }
 
@@ -137,19 +314,18 @@ export function useBgm() {
     }
   }
 
+  // ✅ Called by navbar slider (0..1)
+  function setVolume(v: number) {
+    state.value.volume = clamp(v, 0, 1)
+    applyVolumes()
+  }
+
   function getZoneForPath(path: string): BgmZone {
     if (path.startsWith('/stable')) return 'stable'
     if (path.startsWith('/gauntlet')) return 'gauntlet'
-
-    // reviews + shop + other pages: keep current track (no forced change)
     return null
   }
 
-  /**
-   * Called from layout watch(route.path)
-   * - Only changes when entering Stable or Gauntlet
-   * - Does nothing for reviews/shop so music continues
-   */
   async function setZoneFromRoute(path: string) {
     initOnce()
 
@@ -170,50 +346,9 @@ export function useBgm() {
     await playZone(next)
   }
 
-  function fadeTo(a: HTMLAudioElement, targetVol: number, ms: number, pauseAtEnd = false) {
-    targetVol = clamp(targetVol, 0, 1)
-
-    const startVol = a.volume
-    const start = performance.now()
-    const dur = Math.max(1, ms)
-
-    const tick = () => {
-      const t = (performance.now() - start) / dur
-      const k = clamp(t, 0, 1)
-      a.volume = startVol + (targetVol - startVol) * k
-
-      if (k < 1) {
-        requestAnimationFrame(tick)
-      } else {
-        a.volume = targetVol
-        if (pauseAtEnd && targetVol === 0) {
-          try {
-            a.pause()
-            a.currentTime = 0
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-
-    requestAnimationFrame(tick)
-  }
-
-  function pickTrackForZone(zone: Exclude<BgmZone, null>): string | null {
-    const list = PLAYLISTS[zone]
-    const prev = state.value.chosenTrackByZone[zone]
-    const chosen = prev ?? pickRandom(list, null)
-
-    // If no previous, store newly chosen
-    if (!prev && chosen) state.value.chosenTrackByZone[zone] = chosen
-    return chosen
-  }
-
   /**
-   * Crossfade:
-   * - start new zone track on the inactive audio element
-   * - fade old one down, new one up
+   * Crossfade into the zone's current track.
+   * Tracks will continue automatically when each ends (see ended listeners).
    */
   async function playZone(zone: Exclude<BgmZone, null>) {
     if (!import.meta.client) return
@@ -225,7 +360,8 @@ export function useBgm() {
     if (!a0 || !a1) return
     if (state.value.switching) return
 
-    const track = pickTrackForZone(zone)
+    // Pick "current" track for this zone from the cycle
+    const track = getCurrentTrack(zone)
     if (!track) return
 
     state.value.switching = true
@@ -235,14 +371,16 @@ export function useBgm() {
     const from = audios.value[fromIndex]!
     const to = audios.value[toIndex]!
 
-    // ✅ Only swap src if needed (avoids hiccups)
-    if (to.src !== new URL(track, window.location.href).href) {
+    if (!sameHref(to, track)) {
       to.src = track
       to.currentTime = 0
     }
 
-    to.loop = true
-    to.volume = 0
+    to.loop = false
+
+    // Start "to" silent at mix 0
+    state.value.mix[toIndex] = 0
+    applyVolumes()
 
     try {
       await to.play()
@@ -252,8 +390,8 @@ export function useBgm() {
     }
 
     const FADE_MS = 700
-    fadeTo(from, 0, FADE_MS, true)
-    fadeTo(to, 1, FADE_MS, false)
+    fadeMixTo(fromIndex, 0, FADE_MS, true)
+    fadeMixTo(toIndex, 1, FADE_MS, false)
 
     state.value.aIndex = toIndex
 
@@ -263,19 +401,33 @@ export function useBgm() {
   }
 
   /**
-   * OPTIONAL helper:
-   * Call this if you ever want to re-randomize the current zone’s track
-   * (e.g., “Next Track” button).
+   * Optional helper: skip to next track in current zone immediately.
    */
   async function nextTrackInCurrentZone() {
     if (!state.value.currentZone) return
     const zone = state.value.currentZone
-    const list = PLAYLISTS[zone]
-    const prev = state.value.chosenTrackByZone[zone]
-    const next = pickRandom(list, prev)
-    state.value.chosenTrackByZone[zone] = next
-    if (state.value.enabled && state.value.initialized && next) {
-      await playZone(zone)
+    const next = advanceToNextTrack(zone)
+    if (!next) return
+    if (!state.value.enabled || !state.value.initialized || !import.meta.client) return
+
+    ensureAudioElements()
+    const idx = state.value.aIndex
+    const a = audios.value[idx]
+    if (!a) return
+
+    if (!sameHref(a, next)) {
+      a.src = next
+      a.currentTime = 0
+    }
+
+    state.value.mix[idx] = 1
+    state.value.mix[idx === 0 ? 1 : 0] = 0
+    applyVolumes()
+
+    try {
+      await a.play()
+    } catch {
+      // ignore
     }
   }
 
@@ -284,11 +436,13 @@ export function useBgm() {
     currentZone: computed(() => state.value.currentZone),
     switching: computed(() => state.value.switching),
 
+    volume: computed(() => state.value.volume),
+    setVolume,
+
     initOnce,
     setEnabled,
     setZoneFromRoute,
 
-    // optional
     nextTrackInCurrentZone,
   }
 }
