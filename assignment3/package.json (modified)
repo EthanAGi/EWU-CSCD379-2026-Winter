@@ -1,0 +1,10 @@
+{
+  "name": "assignment3",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^0.0.0"
+  }
+}

@@ -7,7 +7,8 @@
     "build": "nuxt build",
     "start": "node .output/server/index.mjs",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "test": "vitest"
   },
   "dependencies": {
     "mssql": "^12.2.0",
@@ -20,6 +21,11 @@
   },
   "devDependencies": {
     "@types/mssql": "^9.1.9",
-    "@types/node": "^25.2.0"
+    "@types/node": "^25.2.0",
+    "@vitejs/plugin-vue": "^6.0.4",
+    "@vue/test-utils": "^2.4.6",
+    "happy-dom": "^20.6.0",
+    "jsdom": "^28.0.0",
+    "vitest": "^4.0.18"
   }
 }
