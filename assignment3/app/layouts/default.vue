@@ -2,6 +2,15 @@
 const route = useRoute()
 const { player } = usePlayerState()
 
+// ✅ Mobile menu state (MUST be declared before watch uses it)
+const menuOpen = ref(false)
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+}
+function closeMenu() {
+  menuOpen.value = false
+}
+
 // ✅ BGM controller (persists because layout stays mounted)
 const { initOnce, setZoneFromRoute, setEnabled, enabled, switching, volume, setVolume } = useBgm()
 
@@ -15,6 +24,8 @@ watch(
   () => route.path,
   (p) => {
     setZoneFromRoute(p)
+    // ✅ close mobile menu on navigation
+    menuOpen.value = false
   },
   { immediate: true }
 )
@@ -59,7 +70,13 @@ function onVolumeInput(v: number) {
     <header class="nav">
       <!-- ✅ Brand no longer routes to Home -->
       <NuxtLink to="/stable" class="brand" @click="onBrandClick">
-        <span class="mark" aria-hidden="true" />
+        <!-- ✅ Replace the old gradient square with your existing favicon asset from /public -->
+        <!-- Change this to whatever file you actually have: /favicon.ico, /favicon.svg, etc -->
+        <img
+          src="/favicon.ico"
+          alt="Stable Run"
+          class="brandIcon"
+        />
         <span class="title">Stable Run</span>
       </NuxtLink>
 
@@ -92,7 +109,8 @@ function onVolumeInput(v: number) {
           <span v-if="switching" class="dot" aria-hidden="true">•</span>
         </div>
 
-        <nav class="links" aria-label="Primary navigation">
+        <!-- ✅ Desktop links -->
+        <nav class="links desktopLinks" aria-label="Primary navigation">
           <NuxtLink
             v-for="l in links"
             :key="l.to"
@@ -103,7 +121,43 @@ function onVolumeInput(v: number) {
             {{ l.label }}
           </NuxtLink>
         </nav>
+
+        <!-- ✅ Mobile hamburger -->
+        <button
+          class="hamburger"
+          type="button"
+          @click="toggleMenu"
+          :aria-expanded="menuOpen ? 'true' : 'false'"
+          aria-label="Toggle menu"
+          title="Menu"
+        >
+          <span class="hamburgerLines" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
       </div>
+
+      <!-- ✅ Mobile dropdown menu -->
+      <Transition name="menu">
+        <div v-if="menuOpen" class="mobileMenuWrap">
+          <button class="backdrop" type="button" @click="closeMenu" aria-label="Close menu" />
+
+          <nav class="mobileMenu" aria-label="Mobile navigation">
+            <NuxtLink
+              v-for="l in links"
+              :key="l.to"
+              :to="l.to"
+              class="mobileLink"
+              :class="{ active: isActive(l.to) }"
+              @click="closeMenu"
+            >
+              {{ l.label }}
+            </NuxtLink>
+          </nav>
+        </div>
+      </Transition>
     </header>
 
     <main class="container">
@@ -130,13 +184,13 @@ function onVolumeInput(v: number) {
   gap:12px;
   padding:12px 14px;
 
-  /* ✅ removed the “white border” look */
   border-bottom: none;
 
   background: rgba(11,16,32,.72);
   backdrop-filter: blur(10px);
 }
 
+/* Brand */
 .brand{
   display:inline-flex;
   align-items:center;
@@ -146,19 +200,23 @@ function onVolumeInput(v: number) {
   font-weight:900;
   min-width: 0;
 }
-.mark{
+
+/* ✅ favicon image used as brand mark */
+.brandIcon{
   width:28px;
   height:28px;
   border-radius:10px;
-  background: linear-gradient(135deg,#7c5cff,#35d6c5);
+  object-fit:contain;
   flex: 0 0 auto;
 }
+
 .title{
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Right group */
 .right{
   display:flex;
   gap:10px;
@@ -179,9 +237,7 @@ function onVolumeInput(v: number) {
   align-items:center;
   gap:8px;
 }
-.goldPill{
-  padding:6px 10px;
-}
+.goldPill{ padding:6px 10px; }
 
 /* ✅ Minimal audio group */
 .audio{
@@ -256,6 +312,92 @@ function onVolumeInput(v: number) {
   background: linear-gradient(90deg,#7c5cff,#35d6c5);
 }
 
+/* ✅ Hamburger (hidden on desktop by default) */
+.hamburger{
+  display:none;
+  width:40px;
+  height:40px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.05);
+  cursor:pointer;
+  padding:0;
+  align-items:center;
+  justify-content:center;
+  transition: background .15s ease, border-color .15s ease, transform .08s ease;
+}
+.hamburger:hover{
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.16);
+}
+.hamburger:active{ transform: translateY(1px); }
+
+.hamburgerLines{
+  display:inline-flex;
+  flex-direction:column;
+  gap:5px;
+}
+.hamburgerLines > span{
+  width:18px;
+  height:2px;
+  border-radius:999px;
+  background: rgba(255,255,255,.9);
+  display:block;
+  opacity:.9;
+}
+
+/* ✅ Mobile menu overlay */
+.mobileMenuWrap{
+  position:fixed;
+  inset:0;
+  z-index:50;
+}
+.backdrop{
+  position:absolute;
+  inset:0;
+  border:none;
+  background: rgba(0,0,0,.35);
+  cursor:pointer;
+}
+.mobileMenu{
+  position:absolute;
+  top:64px;
+  right:12px;
+  width:min(260px, calc(100vw - 24px));
+  padding:10px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(11,16,32,.92);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.mobileLink{
+  text-decoration:none;
+  color: rgba(255,255,255,.86);
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.mobileLink.active{
+  color:#0b1020;
+  font-weight:900;
+  border:none;
+  background: linear-gradient(90deg,#7c5cff,#35d6c5);
+}
+
+/* Menu animation */
+.menu-enter-active, .menu-leave-active{
+  transition: opacity .14s ease;
+}
+.menu-enter-from, .menu-leave-to{
+  opacity: 0;
+}
+
 /* Main container */
 .container{
   width:min(980px, calc(100% - 32px));
@@ -264,7 +406,7 @@ function onVolumeInput(v: number) {
 }
 
 /* -----------------------
-   Mobile cleanup
+   Mobile behavior
    ----------------------- */
 @media (max-width: 640px){
   .nav{
@@ -272,7 +414,7 @@ function onVolumeInput(v: number) {
     gap:10px;
   }
 
-  .mark{ width:24px; height:24px; border-radius:9px; }
+  .brandIcon{ width:24px; height:24px; border-radius:9px; }
   .title{ max-width: 140px; font-size: 14px; }
 
   .right{ gap:8px; }
@@ -281,19 +423,9 @@ function onVolumeInput(v: number) {
   .iconBtn{ width:32px; height:32px; }
   .slider{ width:88px; }
 
-  .links{
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    max-width: 100%;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .links::-webkit-scrollbar{ display:none; }
-
-  .link{
-    white-space: nowrap;
-    padding:8px 10px;
-  }
+  /* ✅ Hide desktop links; show hamburger */
+  .desktopLinks{ display:none; }
+  .hamburger{ display:inline-flex; }
 }
 
 @media (max-width: 380px){
