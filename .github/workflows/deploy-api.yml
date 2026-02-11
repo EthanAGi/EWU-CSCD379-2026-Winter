@@ -11,6 +11,7 @@ on:
 jobs:
   build_test_deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -19,20 +20,16 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        working-directory: api
-        run: dotnet restore
+        run: dotnet restore api/Assignment3.Api/Assignment3.Api.csproj
 
       - name: Build
-        working-directory: api
-        run: dotnet build -c Release --no-restore
+        run: dotnet build api/Assignment3.Api/Assignment3.Api.csproj -c Release --no-restore
 
       - name: Test
-        working-directory: api
-        run: dotnet test -c Release --no-build
+        run: dotnet test api/Assignment3.Api/Assignment3.Api.csproj -c Release --no-build
 
       - name: Publish
-        working-directory: api/Assignment3.Api
-        run: dotnet publish -c Release -o ../../publish
+        run: dotnet publish api/Assignment3.Api/Assignment3.Api.csproj -c Release -o publish
 
       - name: Deploy
         uses: azure/webapps-deploy@v3
