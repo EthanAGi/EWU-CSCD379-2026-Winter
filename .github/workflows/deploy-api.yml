@@ -25,7 +25,6 @@ jobs:
       - name: Build
         run: dotnet build api/Assignment3.Api/Assignment3.Api.csproj -c Release --no-restore
 
-      # ✅ Skipping tests temporarily (to unblock deployment)
 
       - name: Publish
         run: dotnet publish api/Assignment3.Api/Assignment3.Api.csproj -c Release -o publish
