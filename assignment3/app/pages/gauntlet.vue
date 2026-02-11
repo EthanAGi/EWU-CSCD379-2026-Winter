@@ -1,36 +1,40 @@
 <script setup lang="ts">
 import type { Animal, BattleMove, BattleState, ItemKind } from '../types/game'
 import BattlePanel from '~/components/BattlePanel.vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave } from '#app'
 
 const { player, addGold, healAnimalToFull } = usePlayerState()
 
 /**
  * ✅ IMPORTANT:
- * Single Azure App Service (Nuxt/Nitro).
- * ALL client calls should hit SAME-ORIGIN Nuxt server routes: /api/...
+ * This app is deployed as an Azure Static Web App.
+ * Client calls must hit the separate .NET API base URL (configured via runtimeConfig).
  */
+const config = useRuntimeConfig()
 
+/** Selection + run state */
 const chosenId = ref<string | null>(null)
-const choosing = computed(() => !battle.value && !result.value && !stageOverlay.value)
+const battle = ref<BattleState | null>(null)
+const runGold = ref(0)
 
 const result = ref<{ outcome: 'win' | 'loss'; message: string } | null>(null)
-
-/**
- * After beating a boss (stage 1 or 2), we pause and show a modal:
- * - Continue to next stage
- * - Drop out with winnings so far
- */
 const stageOverlay = ref<{
   stageCleared: 1 | 2 | 3
   stageReward: number
   totalRunGold: number
 } | null>(null)
 
+const choosing = computed(() => !battle.value && !result.value && !stageOverlay.value)
+
+const playerAnimal = computed(() => {
+  if (!player.value || !battle.value) return null
+  return player.value.animals.find((a) => a.id === battle.value!.playerAnimalId) ?? null
+})
+
 /** -------------------------------------------------------
- *  Pull possible opponents from the DATABASE (Nuxt server)
- *  - Base animals (templates)   GET /api/animals/templates
- *  - Player animals (your DB)   GET /api/animals/player/{playerId}
+ *  Pull possible opponents from the DATABASE (API)
+ *  - Base animals (templates)   GET  {apiBase}/api/animals/templates
+ *  - Player animals (your DB)   GET  {apiBase}/api/animals/player/{playerId}
  *  ------------------------------------------------------*/
 
 type AnimalTemplateDto = {
@@ -106,9 +110,11 @@ async function loadOpponentsFromDb() {
   opponentsLoadErr.value = null
 
   try {
-    // ✅ SAME-ORIGIN calls to Nitro server routes
-    const templatesUrl = `/api/animals/templates`
-    const playerAnimalsUrl = `/api/animals/player/${encodeURIComponent(player.value.id)}`
+    const apiBase = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
+    if (!apiBase) throw new Error('Missing runtimeConfig.public.apiBase')
+
+    const templatesUrl = `${apiBase}/api/animals/templates`
+    const playerAnimalsUrl = `${apiBase}/api/animals/player/${encodeURIComponent(player.value.id)}`
 
     const [tpls, pAnimals] = await Promise.all([
       $fetch<AnimalTemplateDto[]>(templatesUrl),
@@ -128,7 +134,7 @@ async function loadOpponentsFromDb() {
     console.error('Failed to load opponents from DB:', e)
     opponentsLoadErr.value = 'Failed to load opponents from the database. Using local fallback enemies.'
     opponentsPool.value = []
-    opponentsLoaded.value = true // prevent infinite retry spam; refresh page to retry
+    opponentsLoaded.value = true
   }
 }
 
@@ -166,8 +172,8 @@ function pickRandomOpponent(stage: 1 | 2 | 3, usedIds: Set<string>, avoidKind?: 
     return true
   }
 
-  const stageCandidates = pool.filter(a => baseFilter(a) && stageFilter(a))
-  const anyCandidates = pool.filter(a => baseFilter(a))
+  const stageCandidates = pool.filter((a) => baseFilter(a) && stageFilter(a))
+  const anyCandidates = pool.filter((a) => baseFilter(a))
   const candidates = stageCandidates.length > 0 ? stageCandidates : anyCandidates
 
   const chosen = candidates[Math.floor(Math.random() * candidates.length)]!
@@ -182,14 +188,6 @@ function rewardForStage(stage: 1 | 2 | 3): number {
   return 1000
 }
 
-const battle = ref<BattleState | null>(null)
-const runGold = ref(0)
-
-const playerAnimal = computed(() => {
-  if (!player.value || !battle.value) return null
-  return player.value.animals.find(a => a.id === battle.value!.playerAnimalId) ?? null
-})
-
 /** ✅ Are we “in an active fight”? (used for leave warning) */
 const inActiveFight = computed(() => !!battle.value && !battle.value.ended && !stageOverlay.value && !result.value)
 
@@ -202,31 +200,21 @@ const leavePendingNav = ref<null | (() => void)>(null)
 function abortRun(reason = 'You left the fight. Progress was lost.') {
   const b = battle.value
   if (b?.playerAnimalId) {
-    // Heal the selected animal on abort/leave
     healAnimalToFull(b.playerAnimalId)
   }
-  // Mark ended so nothing else progresses
   if (b) {
     b.ended = true
     b.outcome = 'loss'
   }
-  // Optionally show a message (or not)
   result.value = { outcome: 'loss', message: reason }
-  // Clear state like a reset
   resetRun()
 }
 
-/**
- * Intercept in-app navigation (Nuxt/Vue Router)
- * - Show our modal (textbox warning)
- * - If they confirm, abort + allow navigation
- */
 onBeforeRouteLeave((_to, _from, next) => {
   if (!inActiveFight.value) return next()
 
   leaveModalOpen.value = true
   leavePendingNav.value = () => next()
-  // block until user chooses
   next(false)
 })
 
@@ -242,18 +230,15 @@ function leaveAnyway() {
 
   abortRun('You left during a fight. The match ended and your animal was healed.')
 
-  // continue navigation
   if (go) go()
 }
 
 /**
- * Intercept browser-level leaving (refresh/close/tab)
- * NOTE: You *cannot* run async work here reliably; this is just the warning.
+ * Browser-level leaving warning (refresh/close)
  */
 function handleBeforeUnload(e: BeforeUnloadEvent) {
   if (!inActiveFight.value) return
   e.preventDefault()
-  // Chrome requires returnValue to be set
   e.returnValue = ''
 }
 
@@ -289,7 +274,7 @@ async function startGauntlet() {
   stageOverlay.value = null
   result.value = null
 
-  const chosen = player.value.animals.find(a => a.id === chosenId.value) ?? null
+  const chosen = player.value.animals.find((a) => a.id === chosenId.value) ?? null
   const avoidKind = chosen?.kind
   const avoidId = chosen?.id
 
@@ -327,13 +312,11 @@ function calcDamage(attackerAtk: number, defenderDef: number, defenderIsDefendin
   return defenderIsDefending ? Math.ceil(raw * 0.5) : raw
 }
 
-// Simple AI
 function enemyChooseMove(enemy: Animal): BattleMove {
   const hpPct = enemy.hpCurrent / enemy.stats.hpMax
   return hpPct <= 0.35 ? 'defend' : 'attack'
 }
 
-/** Sprites */
 function spriteUrl(kind: string) {
   return `/sprites/${kind}.png`
 }
@@ -355,11 +338,6 @@ function flashEnemyHit() {
   if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
   enemyHitTimeout = window.setTimeout(() => (enemyHit.value = false), 170)
 }
-
-onBeforeUnmount(() => {
-  if (playerHitTimeout !== null) window.clearTimeout(playerHitTimeout)
-  if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
-})
 
 /** Attack animation toggles */
 const isAnimating = ref(false)
@@ -389,6 +367,9 @@ function playAttackAnimation(playerMove: BattleMove | 'item', enemyMove: BattleM
 }
 
 onBeforeUnmount(() => {
+  // clean timers
+  if (playerHitTimeout !== null) window.clearTimeout(playerHitTimeout)
+  if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
   clearAnimTimeout()
 })
 
@@ -397,13 +378,13 @@ const battleItemDefs = [
   { kind: 'bandage' as ItemKind, name: 'Bandage', desc: 'Heals 30% HP (keeps the health).' },
   { kind: 'medkit' as ItemKind, name: 'Medkit', desc: 'Heals 70% HP (keeps the health).' },
   { kind: 'attackPill' as ItemKind, name: 'Attack Boost Pill', desc: 'Doubles attack for this boss fight only.' },
-  { kind: 'defensePill' as ItemKind, name: 'Defense Pill', desc: 'Doubles defense for this boss fight only.' },
+  { kind: 'defensePill' as ItemKind, name: 'Defense Boost Pill', desc: 'Doubles defense for this boss fight only.' },
 ] as const
 
 const usableBattleItems = computed(() => {
   const inv = player.value?.inventory
   if (!inv) return []
-  return battleItemDefs.filter(d => (inv[d.kind] ?? 0) > 0)
+  return battleItemDefs.filter((d) => (inv[d.kind] ?? 0) > 0)
 })
 
 const selectedBattleItem = ref<ItemKind | ''>('')
@@ -414,7 +395,7 @@ watchEffect(() => {
     selectedBattleItem.value = ''
     return
   }
-  const stillValid = list.some(x => x.kind === selectedBattleItem.value)
+  const stillValid = list.some((x) => x.kind === selectedBattleItem.value)
   if (!stillValid) {
     const first = list[0]
     if (first) selectedBattleItem.value = first.kind
@@ -426,7 +407,7 @@ function consumeItem(kind: ItemKind): boolean {
   const have = player.value.inventory[kind] ?? 0
   if (have <= 0) return false
   player.value.inventory[kind] = have - 1
-  addGold(0)
+  addGold(0) // persist
   return true
 }
 
@@ -544,7 +525,7 @@ function applyBattleItem(kind: ItemKind) {
 
   if (kind === 'defensePill') {
     defMult.value = 2
-    b.log.unshift('You used a Defense Pill. Your defense is doubled for this boss fight.')
+    b.log.unshift('You used a Defense Boost Pill. Your defense is doubled for this boss fight.')
     return
   }
 
@@ -670,7 +651,12 @@ function stepUseItem() {
   b.round++
 }
 
-function resetRun() {
+/**
+ * ✅ IMPORTANT:
+ * This is the fix for your TS error.
+ * BattlePanel can emit reset with args, and Vue passes them through.
+ */
+function resetRun(..._args: any[]) {
   battle.value = null
   result.value = null
   stageOverlay.value = null
@@ -698,7 +684,7 @@ watchEffect(() => {
   <section class="card">
     <div class="topRow">
       <h1>Gauntlet</h1>
-      <div class="muted small">API: (same-origin /api)</div>
+      <div class="muted small">API: {{ config.public.apiBase }}</div>
     </div>
 
     <p class="muted">
@@ -863,7 +849,6 @@ watchEffect(() => {
 </template>
 
 <style scoped>
-/* (your existing styles unchanged) */
 .card {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 18px;
@@ -956,7 +941,6 @@ watchEffect(() => {
   overflow-wrap: anywhere;
 }
 
-/* Overlay modal */
 .overlay{
   position: fixed;
   inset: 0;

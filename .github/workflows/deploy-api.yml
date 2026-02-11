@@ -1,0 +1,42 @@
+name: Deploy API (Azure App Service)
+
+on:
+  push:
+    branches: [ assignment3-submit ]
+    paths:
+      - "api/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+jobs:
+  build_test_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        working-directory: api
+        run: dotnet restore
+
+      - name: Build
+        working-directory: api
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        working-directory: api
+        run: dotnet test -c Release --no-build
+
+      - name: Publish
+        working-directory: api/Assignment3.Api
+        run: dotnet publish -c Release -o ../../publish
+
+      - name: Deploy
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: assignment3
+          publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
+          package: publish

@@ -6,6 +6,18 @@ import type { AnimalKind, ItemKind } from '../types/game'
 const { player, buyItem, buyAnimal } = usePlayerState()
 
 /**
+ * ✅ SWA + separate API App Service:
+ * Client calls must hit the .NET API base URL from runtimeConfig.
+ */
+const config = useRuntimeConfig()
+
+function apiBaseOrThrow(): string {
+  const base = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
+  if (!base) throw new Error('Missing runtimeConfig.public.apiBase (set NUXT_PUBLIC_API_BASE in SWA env vars)')
+  return base
+}
+
+/**
  * ✅ FIX: don't store these as a single mixed list in UI.
  * getShopItems() returns BOTH growth + battle.
  * We filter by category so battle items never appear in growth again.
@@ -35,11 +47,8 @@ async function loadTemplates() {
   templatesLoading.value = true
   templatesError.value = null
   try {
-    /**
-     * ✅ IMPORTANT:
-     * Single Azure App Service (Nuxt + Nitro) -> SAME ORIGIN calls only.
-     */
-    templates.value = await $fetch<AnimalTemplateDto[]>('/api/animals/templates')
+    const base = apiBaseOrThrow()
+    templates.value = await $fetch<AnimalTemplateDto[]>(`${base}/api/animals/templates`)
   } catch (e: any) {
     templatesError.value = e?.message ?? 'Failed to load animals from server.'
     templates.value = []
@@ -114,7 +123,7 @@ function onBuyItem(kind: ItemKind) {
 /**
  * ✅ When buying an animal:
  *  1) Local purchase
- *  2) Persist to DB via POST /api/animals/claim (Nuxt server route)
+ *  2) Persist to DB via POST {apiBase}/api/animals/claim
  *  If DB save fails, rollback local purchase.
  */
 const buyingAnimal = ref<AnimalKind | null>(null)
@@ -155,7 +164,8 @@ async function onBuyAnimal(kind: AnimalKind) {
   // 2) DB write
   buyingAnimal.value = kind
   try {
-    await $fetch('/api/animals/claim', {
+    const base = apiBaseOrThrow()
+    await $fetch(`${base}/api/animals/claim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: {

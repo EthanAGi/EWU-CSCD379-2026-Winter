@@ -5,8 +5,19 @@ import type { Animal, AnimalKind } from '../types/game'
 const { player, resetPlayer } = usePlayerState()
 
 /**
+ * ✅ SWA + separate API App Service:
+ * Client calls must hit the .NET API base URL from runtimeConfig.
+ */
+const config = useRuntimeConfig()
+function apiBaseOrThrow(): string {
+  const base = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
+  if (!base) throw new Error('Missing runtimeConfig.public.apiBase (set NUXT_PUBLIC_API_BASE in SWA env vars)')
+  return base
+}
+
+/**
  * ----------------------------
- * DB DTOs (Nitro server routes)
+ * DB DTOs (from .NET API)
  * ----------------------------
  */
 type PlayerAnimalDto = {
@@ -68,8 +79,8 @@ function dtoToAnimal(a: PlayerAnimalDto): Animal {
 }
 
 /**
- * Load player animals from DB (same-origin Nitro route):
- * GET /api/animals/player/{playerId}
+ * Load player animals from DB:
+ * GET {apiBase}/api/animals/player/{playerId}
  */
 async function loadAnimalsFromDb() {
   if (!player.value) return
@@ -77,7 +88,8 @@ async function loadAnimalsFromDb() {
   dbError.value = null
 
   try {
-    const url = `/api/animals/player/${encodeURIComponent(player.value.id)}`
+    const base = apiBaseOrThrow()
+    const url = `${base}/api/animals/player/${encodeURIComponent(player.value.id)}`
     const rows = await $fetch<PlayerAnimalDto[]>(url)
     const mapped = Array.isArray(rows) ? rows.map(dtoToAnimal) : []
 

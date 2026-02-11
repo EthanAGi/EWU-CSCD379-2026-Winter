@@ -11,11 +11,12 @@ const { player } = usePlayerState()
 
 /**
  * ✅ IMPORTANT:
- * Single Azure App Service (Nuxt/Nitro) deployment.
- * Therefore ALL client calls should use SAME-ORIGIN Nuxt server routes:
- *   /api/...
- * NOT http://localhost:5072 and NOT runtimeConfig apiBase.
+ * Azure Static Web App (client) + separate .NET API (App Service).
+ * Therefore client calls must hit the API base URL configured via runtimeConfig:
+ *   config.public.apiBase
+ * NOT /api/... (Nitro) and NOT localhost in production.
  */
+const config = useRuntimeConfig()
 
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
@@ -33,12 +34,18 @@ watchEffect(() => {
   }
 })
 
+function getApiBase(): string {
+  const apiBase = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
+  if (!apiBase) throw new Error('Missing runtimeConfig.public.apiBase')
+  return apiBase
+}
+
 async function loadReviews() {
   loading.value = true
   errorMsg.value = null
   try {
-    // ✅ same-origin (Nitro route)
-    reviews.value = await $fetch<ReviewDto[]>(`/api/reviews?take=50`)
+    const apiBase = getApiBase()
+    reviews.value = await $fetch<ReviewDto[]>(`${apiBase}/api/reviews?take=50`)
   } catch (e: any) {
     console.error(e)
     errorMsg.value = e?.message ?? 'Failed to load reviews.'
@@ -48,7 +55,10 @@ async function loadReviews() {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString()
+  // If API sends UTC without a trailing Z, normalize to UTC for consistent display
+  const normalized = iso && !iso.endsWith('Z') ? `${iso}Z` : iso
+  const d = new Date(normalized)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
 async function submitReview() {
@@ -74,8 +84,8 @@ async function submitReview() {
 
   submitting.value = true
   try {
-    // ✅ same-origin (Nitro route)
-    const created = await $fetch<ReviewDto>(`/api/reviews`, {
+    const apiBase = getApiBase()
+    const created = await $fetch<ReviewDto>(`${apiBase}/api/reviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: { playerName: name, body, rating },

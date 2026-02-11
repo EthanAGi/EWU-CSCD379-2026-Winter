@@ -34,33 +34,10 @@ function hpPercent(current: number, max: number): number {
   return Math.max(0, Math.min(100, (current / max) * 100))
 }
 
-const handleItemSelect = (event: Event) => {
+function handleItemSelect(event: Event) {
   const value = (event.target as HTMLSelectElement).value as ItemKind | ''
   emit('update:selectedBattleItem', value)
 }
-
-const battleItemDefs = [
-  {
-    kind: 'bandage' as ItemKind,
-    name: 'Bandage',
-    desc: 'Heals 30% HP (keeps the health).',
-  },
-  {
-    kind: 'medkit' as ItemKind,
-    name: 'Medkit',
-    desc: 'Heals 70% HP (keeps the health).',
-  },
-  {
-    kind: 'attackPill' as ItemKind,
-    name: 'Attack Boost Pill',
-    desc: 'Doubles attack for this boss fight only.',
-  },
-  {
-    kind: 'defensePill' as ItemKind,
-    name: 'Defense Pill',
-    desc: 'Doubles defense for this boss fight only.',
-  },
-] as const
 </script>
 
 <template>
@@ -80,7 +57,7 @@ const battleItemDefs = [
           <span class="muted"> (ends after this boss)</span>
         </div>
 
-        <button class="btn" @click="$emit('reset')" type="button">Reset</button>
+        <button class="btn" @click="emit('reset')" type="button">Reset</button>
       </div>
     </div>
 
@@ -147,11 +124,11 @@ const battleItemDefs = [
 
     <!-- Controls -->
     <div class="actions" v-if="!battle.ended">
-      <button class="btn primary" @click="$emit('attack')" type="button" :disabled="isAnimating">
+      <button class="btn primary" @click="emit('attack')" type="button" :disabled="isAnimating">
         Attack
       </button>
 
-      <button class="btn" @click="$emit('defend')" type="button" :disabled="isAnimating">
+      <button class="btn" @click="emit('defend')" type="button" :disabled="isAnimating">
         Defend
       </button>
 
@@ -160,7 +137,7 @@ const battleItemDefs = [
         <select
           class="select"
           :value="selectedBattleItem"
-          @input="handleItemSelect"
+          @change="handleItemSelect"
           :disabled="isAnimating || usableBattleItems.length === 0"
         >
           <option value="" disabled>
@@ -174,7 +151,7 @@ const battleItemDefs = [
 
         <button
           class="btn"
-          @click="$emit('useItem')"
+          @click="emit('useItem')"
           type="button"
           :disabled="isAnimating || !selectedBattleItem || usableBattleItems.length === 0"
         >
@@ -273,20 +250,14 @@ const battleItemDefs = [
   will-change: transform;
 }
 
-.lungeWrap.lungeRight {
-  animation: lungeRight 260ms ease-in-out;
-}
-
-.lungeWrap.lungeLeft {
-  animation: lungeLeft 260ms ease-in-out;
-}
+.lungeWrap.lungeRight { animation: lungeRight 260ms ease-in-out; }
+.lungeWrap.lungeLeft { animation: lungeLeft 260ms ease-in-out; }
 
 @keyframes lungeRight {
   0% { transform: translateX(0); }
   45% { transform: translateX(46px); }
   100% { transform: translateX(0); }
 }
-
 @keyframes lungeLeft {
   0% { transform: translateX(0); }
   45% { transform: translateX(-46px); }
@@ -415,9 +386,7 @@ const battleItemDefs = [
   color: rgba(255, 255, 255, 0.92);
 }
 
-.itemHint {
-  margin-top: 10px;
-}
+.itemHint { margin-top: 10px; }
 
 /* Mobile adjustments */
 @media (max-width: 560px) {
@@ -450,9 +419,7 @@ const battleItemDefs = [
     width: min(220px, 88vw);
   }
 
-  .actions {
-    justify-content: center;
-  }
+  .actions { justify-content: center; }
 
   @keyframes lungeRight {
     0% { transform: translateX(0); }

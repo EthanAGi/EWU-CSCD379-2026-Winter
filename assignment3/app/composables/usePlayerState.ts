@@ -127,6 +127,7 @@ export function getAnimalPrices(): Record<AnimalKind, number> {
  * localStorage helpers
  * ------------------------------------------- */
 function load(): Player | null {
+  if (!import.meta.client) return null
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
@@ -137,10 +138,12 @@ function load(): Player | null {
 }
 
 function save(p: Player) {
+  if (!import.meta.client) return
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
 }
 
 function clearSaved() {
+  if (!import.meta.client) return
   try {
     localStorage.removeItem(STORAGE_KEY)
   } catch {
@@ -206,6 +209,13 @@ function animalIdToDbId(id: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+function getApiBaseOrThrow(): string {
+  const config = useRuntimeConfig()
+  const apiBase = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
+  if (!apiBase) throw new Error('Missing runtimeConfig.public.apiBase (check NUXT_PUBLIC_API_BASE / _PROD)')
+  return apiBase
+}
+
 export function usePlayerState() {
   const player = useState<Player | null>('player', () => null)
 
@@ -221,7 +231,7 @@ export function usePlayerState() {
     const p: Player = {
       id: newId(),
       name: name.trim(),
-      gold: 0,
+      gold: 300,
       animals: [],
       inventory: {
         treat: 0,
@@ -238,15 +248,12 @@ export function usePlayerState() {
   }
 
   /**
-   * ✅ NEW:
-   * Hard reset of the local player + persisted storage.
+   * ✅ Hard reset of the local player + persisted storage.
    * Use this when you want to force the user back through starter flow.
    */
   function resetPlayer() {
     player.value = null
-    if (import.meta.client) {
-      clearSaved()
-    }
+    clearSaved()
   }
 
   function chooseStarter(kind: AnimalKind) {
@@ -341,19 +348,21 @@ export function usePlayerState() {
   }
 
   /* -------------------------------------------
-   * ✅ DB functions (UPDATED: same-origin /api)
+   * ✅ DB functions (FIXED: use runtimeConfig.apiBase)
    * ------------------------------------------- */
 
   async function dbLoadPlayerAnimals(playerId: string): Promise<Animal[]> {
-    const url = `/api/animals/player/${encodeURIComponent(playerId)}`
+    const apiBase = getApiBaseOrThrow()
+    const url = `${apiBase}/api/animals/player/${encodeURIComponent(playerId)}`
     const rows = await $fetch<PlayerAnimalDto[]>(url)
     return Array.isArray(rows) ? rows.map(dtoToAnimal) : []
   }
 
   async function dbClaimAnimal(kind: AnimalKind, customName?: string): Promise<Animal | null> {
     if (!player.value) return null
+    const apiBase = getApiBaseOrThrow()
 
-    const created = await $fetch<PlayerAnimalDto>(`/api/animals/claim`, {
+    const created = await $fetch<PlayerAnimalDto>(`${apiBase}/api/animals/claim`, {
       method: 'POST',
       body: {
         ownerPlayerId: player.value.id,
@@ -367,18 +376,12 @@ export function usePlayerState() {
     return dtoToAnimal(created)
   }
 
-  /**
-   * IMPORTANT:
-   * This assumes you created a Nitro route:
-   *   PUT /api/animals/playerAnimal/{id}
-   * i.e. file:
-   *   server/api/animals/playerAnimal/[id].put.ts
-   */
   async function dbUpdatePlayerAnimal(animal: Animal): Promise<boolean> {
     const dbId = animalIdToDbId(animal.id)
     if (!dbId) return false
+    const apiBase = getApiBaseOrThrow()
 
-    await $fetch(`/api/animals/playerAnimal/${dbId}`, {
+    await $fetch(`${apiBase}/api/animals/playerAnimal/${dbId}`, {
       method: 'PUT',
       body: {
         name: animal.name,
@@ -391,6 +394,7 @@ export function usePlayerState() {
         hpCurrent: animal.hpCurrent,
       },
     })
+
     return true
   }
 
@@ -400,7 +404,7 @@ export function usePlayerState() {
 
     // local state actions
     createPlayer,
-    resetPlayer, // ✅ added
+    resetPlayer,
     chooseStarter,
     addGold,
     buyItem,
@@ -409,7 +413,7 @@ export function usePlayerState() {
     feedAnimal,
     healAnimalToFull,
 
-    // ✅ DB helpers
+    // DB helpers
     dbLoadPlayerAnimals,
     dbClaimAnimal,
     dbUpdatePlayerAnimal,

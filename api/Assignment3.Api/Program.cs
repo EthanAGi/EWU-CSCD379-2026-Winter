@@ -7,8 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 
-// ✅ CORS (Nuxt local + Azure deployed site)
-var corsPolicyName = "NuxtDev";
+// ✅ CORS (Nuxt local dev + Azure Static Web App)
+var corsPolicyName = "ClientCors";
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(corsPolicyName, policy =>
@@ -16,18 +16,17 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(
                 "http://localhost:3000",
-                "https://assignment3-b6dfeygfb0bgfgbr.eastus2-01.azurewebsites.net"
+                "http://localhost:5173",
+                "https://green-forest-00c371e0f.2.azurestaticapps.net"
             )
             .AllowAnyHeader()
             .AllowAnyMethod();
-
-        // If you ever switch to cookies/auth, use:
-        // .AllowCredentials();
     });
 });
 
 // ✅ Register business logic services
 builder.Services.AddScoped<IReviewService, ReviewService>();
+builder.Services.AddScoped<IAnimalService, AnimalService>();
 
 // ✅ Entity Framework + SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -39,25 +38,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-// TESTTESTTEST
-var app = builder.Build();
 
-// ✅ TEMP: Definitive DB connectivity test (safe for Azure logs)
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    try
-    {
-        db.Database.OpenConnection();
-        Console.WriteLine("✅ DATABASE CONNECTION SUCCESSFUL");
-        db.Database.CloseConnection();
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine("❌ DATABASE CONNECTION FAILED");
-        Console.WriteLine(ex.ToString());
-    }
-}
+var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

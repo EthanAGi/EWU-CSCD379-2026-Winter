@@ -4,6 +4,13 @@ import { onBeforeRouteLeave } from 'vue-router'
 
 const { player, createPlayer, chooseStarter, addGold } = usePlayerState()
 
+/**
+ * ✅ IMPORTANT:
+ * Static Web App (client) must call the separate .NET API base URL.
+ */
+const config = useRuntimeConfig()
+const apiBase = computed(() => (config.public.apiBase ?? '').toString().replace(/\/+$/, ''))
+
 const name = ref('')
 
 const stage = computed(() => {
@@ -66,6 +73,12 @@ async function pickStarter(kind: AnimalKind) {
   const p = player.value
   if (!p) return
 
+  // Ensure API base exists (prevents mysterious fetch failures)
+  if (!apiBase.value) {
+    starterMsg.value = 'Missing API base URL (config.public.apiBase). Check your env var NUXT_PUBLIC_API_BASE.'
+    return
+  }
+
   const prevGold = p.gold
   const prevAnimals = [...p.animals]
 
@@ -74,7 +87,8 @@ async function pickStarter(kind: AnimalKind) {
 
   savingStarter.value = kind
   try {
-    await $fetch(`/api/animals/claim`, {
+    // ✅ Cross-origin call to .NET API
+    await $fetch(`${apiBase.value}/api/animals/claim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: {

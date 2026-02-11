@@ -1,0 +1,42 @@
+name: Deploy Client (Azure Static Web App)
+
+on:
+  push:
+    branches: [ assignment3-submit ]
+    paths:
+      - "assignment3/**"
+      - ".github/workflows/deploy-client-swa.yml"
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: assignment3/package-lock.json
+
+      - name: Install
+        working-directory: assignment3
+        run: npm ci
+
+      - name: Test
+        working-directory: assignment3
+        run: npm test -- --run
+
+      - name: Generate
+        working-directory: assignment3
+        run: npm run generate
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_FOREST_00C371E0F }}
+          action: upload
+          app_location: "assignment3"
+          output_location: ".output/public"
