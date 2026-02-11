@@ -7,27 +7,29 @@ public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    // Existing tables
     public DbSet<AnimalTemplate> AnimalTemplates => Set<AnimalTemplate>();
     public DbSet<PlayerAnimal> PlayerAnimals => Set<PlayerAnimal>();
-
-    // ✅ NEW: Reviews table
     public DbSet<Review> Reviews => Set<Review>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // ✅ Ensure only one template row per kind (dog/cat/etc)
+        // Unique animal kinds
         modelBuilder.Entity<AnimalTemplate>()
             .HasIndex(t => t.Kind)
             .IsUnique();
 
-        // ✅ Optional: Helpful index for "latest reviews" queries
+        // Index for sorting reviews
         modelBuilder.Entity<Review>()
             .HasIndex(r => r.CreatedAtUtc);
 
-        // ✅ Seed one base version of every animal (matches your baseStats() in TS)
+        // Ensure review date is auto-set if not provided
+        modelBuilder.Entity<Review>()
+            .Property(r => r.CreatedAtUtc)
+            .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+        // Seed templates
         modelBuilder.Entity<AnimalTemplate>().HasData(
             new AnimalTemplate { Id = 1, Kind = "dog", Attack = 5, Defense = 4, Affection = 3, Level = 1, HpMax = 30 },
             new AnimalTemplate { Id = 2, Kind = "cat", Attack = 6, Defense = 3, Affection = 4, Level = 1, HpMax = 28 },
