@@ -29,14 +29,12 @@ jobs:
         working-directory: assignment3
         run: npm test -- --run
 
-      # IMPORTANT: This is when Nuxt "bakes in" NUXT_PUBLIC_* into the built JS
       - name: Generate
         working-directory: assignment3
         env:
           NUXT_PUBLIC_API_BASE: https://assignment3-b6dfeygfb0bgfgbr.eastus2-01.azurewebsites.net
         run: npm run generate
 
-      # ✅ Fail fast if Nuxt didn't generate a static index.html
       - name: Verify static output exists
         run: |
           ls -la assignment3/.output/public
@@ -47,8 +45,10 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_FOREST_00C371E0F }}
           action: upload
-          app_location: "assignment3"
-          # ✅ Explicitly upload the generated static site folder
-          app_artifact_location: "assignment3/.output/public"
+
+          # ✅ IMPORTANT: point SWA directly at the folder that contains index.html
+          app_location: "assignment3/.output/public"
+
+          # ✅ we're already built
           skip_app_build: true
           skip_api_build: true
