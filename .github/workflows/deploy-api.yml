@@ -31,9 +31,19 @@ jobs:
         working-directory: api
         run: dotnet publish Assignment3.Api/Assignment3.Api.csproj -c Release -o ../publish --no-build
 
+      - name: Verify publish output
+        run: |
+          ls -la publish | head -50
+          test -f publish/Assignment3.Api.dll
+
+      - name: Zip publish output
+        run: |
+          cd publish
+          zip -r ../publish.zip .
+
       - name: Deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: assignment3
           publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: ./publish
+          package: ./publish.zip
