@@ -36,13 +36,13 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     )
 );
 
-// Swagger / OpenAPI (enable everywhere for your class project)
+// Swagger / OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// ✅ Helpful error output (so you don’t get “blank 500”)
+// ✅ Helpful error output
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -51,7 +51,6 @@ app.UseExceptionHandler(errorApp =>
         context.Response.StatusCode = 500;
         context.Response.ContentType = "application/problem+json";
 
-        // Don’t leak secrets; but do show message for debugging.
         await context.Response.WriteAsJsonAsync(new
         {
             title = "Server error",
@@ -62,23 +61,30 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-// ✅ Swagger in Azure too (not just Development)
+// Swagger enabled everywhere
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// (Optional but useful) create/update DB schema automatically
-// If you don’t want auto-migrations, remove this block.
+// ✅ Auto-migrate DB (ONLY if provider is relational)
+// In integration tests you replace SQL Server with EF InMemory,
+// and InMemory is NOT relational, so Migrate() would throw.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    if (db.Database.IsRelational())
+    {
+        db.Database.Migrate();
+    }
 }
 
 app.UseHttpsRedirection();
 
-// ✅ Enable CORS (must be BEFORE MapControllers)
+// ✅ Enable CORS BEFORE MapControllers
 app.UseCors(corsPolicyName);
 
 app.MapControllers();
 
 app.Run();
+
+// 🔥 REQUIRED FOR INTEGRATION TESTS
+public partial class Program { }

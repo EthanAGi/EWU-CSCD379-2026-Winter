@@ -3,46 +3,34 @@ import { mount } from '@vue/test-utils'
 import AnimalSprite from '../../app/components/AnimalSprite.vue'
 
 describe('AnimalSprite Component', () => {
-    it('renders with correct animal data', () => {
-        const props = {
-            sprite: { id: '1', x: 100, y: 200, vx: 0, vy: 0, bobDelay: 0 },
-            animal: { id: '1', name: 'Fluffy', kind: 'cat' },
-            isSelected: false
-        }
-        const component = mount(AnimalSprite, { props })
-        expect(component.find('button').exists()).toBe(true)
-        expect(component.find('img').exists()).toBe(true)
-    })
+  const baseProps = {
+    sprite: { id: '1', x: 100, y: 200, vx: 0, vy: 0, bobDelay: 0 },
+    animal: { id: '1', name: 'Fluffy', kind: 'cat' as const },
+    isSelected: false,
+  }
 
-    it('applies selected class when isSelected is true', () => {
-        const props = {
-            sprite: { id: '1', x: 100, y: 200, vx: 0, vy: 0, bobDelay: 0 },
-            animal: { id: '1', name: 'Fluffy', kind: 'cat' },
-            isSelected: true
-        }
-        const component = mount(AnimalSprite, { props })
-        expect(component.find('.selected').exists()).toBe(true)
-    })
+  it('renders a button and an image', () => {
+    const wrapper = mount(AnimalSprite, { props: baseProps })
+    expect(wrapper.find('button').exists()).toBe(true)
+    expect(wrapper.find('img').exists()).toBe(true)
+  })
 
-    it('emits click event when button is clicked', async () => {
-        const props = {
-            sprite: { id: '1', x: 100, y: 200, vx: 0, vy: 0, bobDelay: 0 },
-            animal: { id: '1', name: 'Fluffy', kind: 'cat' },
-            isSelected: false
-        }
-        const component = mount(AnimalSprite, { props })
-        await component.find('button').trigger('click')
-        expect(component.emitted('click')).toBeTruthy()
-        expect(component.emitted('click')?.[0]).toEqual(['1'])
-    })
+  it('applies selected class when isSelected is true', () => {
+    const wrapper = mount(AnimalSprite, { props: { ...baseProps, isSelected: true } })
+    expect(wrapper.find('.selected').exists()).toBe(true)
+  })
 
-    it('applies facingLeft class when vx is negative', () => {
-        const props = {
-            sprite: { id: '1', x: 100, y: 200, vx: -5, vy: 0, bobDelay: 0 },
-            animal: { id: '1', name: 'Fluffy', kind: 'cat' },
-            isSelected: false
-        }
-        const component = mount(AnimalSprite, { props })
-        expect(component.find('.facingLeft').exists()).toBe(true)
+  it('emits click event when button is clicked', async () => {
+    const wrapper = mount(AnimalSprite, { props: baseProps })
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.emitted('click')).toBeTruthy()
+    expect(wrapper.emitted('click')?.[0]).toEqual(['1'])
+  })
+
+  it('applies facingLeft class when vx is negative', () => {
+    const wrapper = mount(AnimalSprite, {
+      props: { ...baseProps, sprite: { ...baseProps.sprite, vx: -5 } },
     })
+    expect(wrapper.find('.facingLeft').exists()).toBe(true)
+  })
 })

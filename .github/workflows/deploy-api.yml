@@ -19,13 +19,23 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        working-directory: api
-        run: dotnet restore Assignment3.Api/Assignment3.Api.csproj
+      # ----------------------------
+      # Build + Test (from repo root)
+      # Tests live in api/Assignment3.Api.Tests next to api/Assignment3.Api
+      # ----------------------------
 
-      - name: Build
-        working-directory: api
-        run: dotnet build Assignment3.Api/Assignment3.Api.csproj -c Release --no-restore
+      - name: Restore (API + Tests)
+        run: dotnet restore api/Assignment3.Api.Tests/Assignment3.Api.Tests.csproj
+
+      - name: Build (API + Tests)
+        run: dotnet build api/Assignment3.Api.Tests/Assignment3.Api.Tests.csproj -c Release --no-restore
+
+      - name: Test (API + Integration)
+        run: dotnet test api/Assignment3.Api.Tests/Assignment3.Api.Tests.csproj -c Release --no-build --verbosity normal
+
+      # ----------------------------
+      # Publish API (only after tests pass)
+      # ----------------------------
 
       - name: Publish
         working-directory: api

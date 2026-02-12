@@ -25,6 +25,8 @@ jobs:
         working-directory: assignment3
         run: npm ci
 
+      # ✅ Run Vitest tests (they can live in assignment3/tests and/or anywhere configured by vitest)
+      # This assumes your package.json has "test": "vitest"
       - name: Test
         working-directory: assignment3
         run: npm test -- --run
