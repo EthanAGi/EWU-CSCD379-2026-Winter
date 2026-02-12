@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { getShopItems, getAnimalPrices, usePlayerState } from '../composables/usePlayerState'
+import { usePlayerState } from '~/composables/usePlayerState'
+import { getShopItems, getAnimalPrices } from '~/game/playerLogic'
 import ShopItemCard from '~/components/ShopItemCard.vue'
 import type { AnimalKind, ItemKind } from '../types/game'
 
