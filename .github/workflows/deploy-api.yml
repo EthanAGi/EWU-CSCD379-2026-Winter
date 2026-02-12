@@ -20,18 +20,20 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        run: dotnet restore api/Assignment3.Api/Assignment3.Api.csproj
+        working-directory: api
+        run: dotnet restore Assignment3.Api/Assignment3.Api.csproj
 
       - name: Build
-        run: dotnet build api/Assignment3.Api/Assignment3.Api.csproj -c Release --no-restore
-
+        working-directory: api
+        run: dotnet build Assignment3.Api/Assignment3.Api.csproj -c Release --no-restore
 
       - name: Publish
-        run: dotnet publish api/Assignment3.Api/Assignment3.Api.csproj -c Release -o publish
+        working-directory: api
+        run: dotnet publish Assignment3.Api/Assignment3.Api.csproj -c Release -o ../publish --no-build
 
       - name: Deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: assignment3
           publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: publish
+          package: ./publish
