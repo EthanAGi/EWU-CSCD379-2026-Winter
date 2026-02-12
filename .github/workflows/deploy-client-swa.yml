@@ -42,6 +42,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_FOREST_00C371E0F }}
           action: upload
           app_location: "assignment3"
-          output_location: ".output/public"
+          # ✅ Make output path unambiguous from repo root
+          output_location: "assignment3/.output/public"
           skip_app_build: true
           skip_api_build: true
