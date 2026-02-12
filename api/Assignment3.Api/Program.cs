@@ -18,6 +18,8 @@ builder.Services.AddCors(options =>
                 "http://localhost:3000",
                 "http://localhost:5173",
                 "https://green-forest-00c371e0f.2.azurestaticapps.net"
+                // If your SWA uses a staging URL during PR deploys, add it here too.
+                // Example format: https://<random>-green-forest-00c371e0f.2.azurestaticapps.net
             )
             .AllowAnyHeader()
             .AllowAnyMethod();
@@ -41,13 +43,19 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+/**
+ * ✅ IMPORTANT for Azure Linux App Service:
+ * Bind to the port Azure provides (usually 8080 via PORT).
+ * If you don't, the container can "start" but never becomes reachable.
+ */
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Urls.Add($"http://0.0.0.0:{port}");
 
+// ✅ Always enable Swagger so you can verify endpoints in Azure
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// HTTPS redirection is fine (Azure terminates TLS at the front door)
 app.UseHttpsRedirection();
 
 // ✅ Enable CORS (must be BEFORE MapControllers)
@@ -55,5 +63,8 @@ app.UseCors(corsPolicyName);
 
 // Map attribute-routed controllers (e.g., /api/reviews)
 app.MapControllers();
+
+// Optional: makes the root not 404, helpful for quick checks
+app.MapGet("/", () => Results.Ok("Assignment3 API is running"));
 
 app.Run();
