@@ -1,10 +1,11 @@
 using Assignment3.Api.Data;
 using Assignment3.Api.Services;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Controllers
 builder.Services.AddControllers();
 
 // ✅ CORS (Nuxt local dev + Azure Static Web App)
@@ -18,8 +19,6 @@ builder.Services.AddCors(options =>
                 "http://localhost:3000",
                 "http://localhost:5173",
                 "https://green-forest-00c371e0f.2.azurestaticapps.net"
-                // If your SWA uses a staging URL during PR deploys, add it here too.
-                // Example format: https://<random>-green-forest-00c371e0f.2.azurestaticapps.net
             )
             .AllowAnyHeader()
             .AllowAnyMethod();
@@ -37,34 +36,49 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     )
 );
 
-// Swagger / OpenAPI
+// Swagger / OpenAPI (enable everywhere for your class project)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-/**
- * ✅ IMPORTANT for Azure Linux App Service:
- * Bind to the port Azure provides (usually 8080 via PORT).
- * If you don't, the container can "start" but never becomes reachable.
- */
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-app.Urls.Add($"http://0.0.0.0:{port}");
+// ✅ Helpful error output (so you don’t get “blank 500”)
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var ex = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/problem+json";
 
-// ✅ Always enable Swagger so you can verify endpoints in Azure
+        // Don’t leak secrets; but do show message for debugging.
+        await context.Response.WriteAsJsonAsync(new
+        {
+            title = "Server error",
+            status = 500,
+            detail = ex?.Message,
+            type = ex?.GetType().FullName
+        });
+    });
+});
+
+// ✅ Swagger in Azure too (not just Development)
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// HTTPS redirection is fine (Azure terminates TLS at the front door)
+// (Optional but useful) create/update DB schema automatically
+// If you don’t want auto-migrations, remove this block.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
 app.UseHttpsRedirection();
 
 // ✅ Enable CORS (must be BEFORE MapControllers)
 app.UseCors(corsPolicyName);
 
-// Map attribute-routed controllers (e.g., /api/reviews)
 app.MapControllers();
-
-// Optional: makes the root not 404, helpful for quick checks
-app.MapGet("/", () => Results.Ok("Assignment3 API is running"));
 
 app.Run();
