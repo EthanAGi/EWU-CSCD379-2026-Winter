@@ -132,7 +132,7 @@ async function loadOpponentsFromDb() {
     opponentsLoaded.value = true
   } catch (e: any) {
     console.error('Failed to load opponents from DB:', e)
-    opponentsLoadErr.value = 'Failed to load opponents from the database. Using local fallback enemies.'
+    opponentsLoadErr.value = 'Could not load enemies from the database. Using local enemies.'
     opponentsPool.value = []
     opponentsLoaded.value = true
   }
@@ -199,9 +199,7 @@ const leavePendingNav = ref<null | (() => void)>(null)
 
 function abortRun(reason = 'You left the fight. Progress was lost.') {
   const b = battle.value
-  if (b?.playerAnimalId) {
-    healAnimalToFull(b.playerAnimalId)
-  }
+  if (b?.playerAnimalId) healAnimalToFull(b.playerAnimalId)
   if (b) {
     b.ended = true
     b.outcome = 'loss'
@@ -212,7 +210,6 @@ function abortRun(reason = 'You left the fight. Progress was lost.') {
 
 onBeforeRouteLeave((_to, _from, next) => {
   if (!inActiveFight.value) return next()
-
   leaveModalOpen.value = true
   leavePendingNav.value = () => next()
   next(false)
@@ -367,7 +364,6 @@ function playAttackAnimation(playerMove: BattleMove | 'item', enemyMove: BattleM
 }
 
 onBeforeUnmount(() => {
-  // clean timers
   if (playerHitTimeout !== null) window.clearTimeout(playerHitTimeout)
   if (enemyHitTimeout !== null) window.clearTimeout(enemyHitTimeout)
   clearAnimTimeout()
@@ -546,10 +542,10 @@ function stepTurn(playerMove: BattleMove) {
   b.playerDefending = playerMove === 'defend'
   b.enemyDefending = enemyMove === 'defend'
 
+  // Keep minimal log (still used internally; UI log removed)
   b.log.unshift(`Round ${b.round}: You chose ${playerMove.toUpperCase()}, enemy chose ${enemyMove.toUpperCase()}.`)
 
   if (playerMove === 'defend' && enemyMove === 'defend') {
-    b.log.unshift('Both defended. No damage dealt.')
     b.round++
     return
   }
@@ -558,7 +554,6 @@ function stepTurn(playerMove: BattleMove) {
     const effectiveAtk = Math.round(p.stats.attack * atkMult.value)
     const dmg = calcDamage(effectiveAtk, b.enemy.stats.defense, b.enemyDefending)
     b.enemy.hpCurrent = Math.max(0, b.enemy.hpCurrent - dmg)
-    b.log.unshift(`You hit ${b.enemy.name} for ${dmg}.`)
     flashEnemyHit()
   }
 
@@ -566,8 +561,6 @@ function stepTurn(playerMove: BattleMove) {
     const stageReward = rewardForStage(b.stage)
     addGold(stageReward)
     runGold.value += stageReward
-
-    b.log.unshift(`You defeated ${b.enemy.name}! +$${stageReward} (Run total: $${runGold.value})`)
 
     if (b.stage === 3) {
       resetBattleBuffs()
@@ -580,7 +573,6 @@ function stepTurn(playerMove: BattleMove) {
     }
 
     resetBattleBuffs()
-
     stageOverlay.value = {
       stageCleared: b.stage,
       stageReward,
@@ -593,7 +585,6 @@ function stepTurn(playerMove: BattleMove) {
     const effectiveDef = Math.round(p.stats.defense * defMult.value)
     const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
     p.hpCurrent = Math.max(0, p.hpCurrent - dmg)
-    b.log.unshift(`${b.enemy.name} hit you for ${dmg}.`)
     flashPlayerHit()
   }
 
@@ -602,7 +593,6 @@ function stepTurn(playerMove: BattleMove) {
     healAnimalToFull(b.playerAnimalId)
     b.ended = true
     b.outcome = 'loss'
-    b.log.unshift('You lost the Gauntlet run.')
     result.value = { outcome: 'loss', message: `Your animal fell in Stage ${b.stage}.` }
     return
   }
@@ -625,17 +615,13 @@ function stepUseItem() {
   b.playerDefending = false
   b.enemyDefending = enemyMove === 'defend'
 
-  b.log.unshift(`Round ${b.round}: You used an item, enemy chose ${enemyMove.toUpperCase()}.`)
   applyBattleItem(selectedBattleItem.value)
 
   if (enemyMove === 'attack') {
     const effectiveDef = Math.round(p.stats.defense * defMult.value)
     const dmg = calcDamage(b.enemy.stats.attack, effectiveDef, b.playerDefending)
     p.hpCurrent = Math.max(0, p.hpCurrent - dmg)
-    b.log.unshift(`${b.enemy.name} hit you for ${dmg}.`)
     flashPlayerHit()
-  } else {
-    b.log.unshift(`${b.enemy.name} defended.`)
   }
 
   if (p.hpCurrent <= 0) {
@@ -643,7 +629,6 @@ function stepUseItem() {
     healAnimalToFull(b.playerAnimalId)
     b.ended = true
     b.outcome = 'loss'
-    b.log.unshift('You lost the Gauntlet run.')
     result.value = { outcome: 'loss', message: `Your animal fell in Stage ${b.stage}.` }
     return
   }
@@ -653,7 +638,6 @@ function stepUseItem() {
 
 /**
  * ✅ IMPORTANT:
- * This is the fix for your TS error.
  * BattlePanel can emit reset with args, and Vue passes them through.
  */
 function resetRun(..._args: any[]) {
@@ -681,212 +665,228 @@ watchEffect(() => {
 </script>
 
 <template>
-  <section class="card">
-    <div class="topRow">
-      <h1>Gauntlet</h1>
-      <div class="muted small">API: {{ config.public.apiBase }}</div>
-    </div>
+  <!-- ✅ Full-height, no-scroll layout -->
+  <section class="page">
+    <div class="container">
+      <!-- Minimal header (no API text) -->
+      <div class="header">
+        <h1 class="title">Gauntlet</h1>
+        <p class="subtitle">Fight 3 boss battles. Each turn: Attack, Defend, or Use Item.</p>
+      </div>
 
-    <p class="muted">
-      Choose an animal and fight 3 boss battles. Each turn: Attack, Defend, or Use Item.
-    </p>
+      <!-- ✅ Leave warning modal -->
+      <div v-if="leaveModalOpen" class="overlay" role="dialog" aria-modal="true">
+        <div class="overlayCard">
+          <div class="overlayTop">
+            <div class="overlayBadge loss">LEAVING NOW?</div>
+          </div>
 
-    <!-- ✅ Leave warning modal -->
-    <div v-if="leaveModalOpen" class="overlay" role="dialog" aria-modal="true">
-      <div class="overlayCard">
-        <div class="overlayTop">
-          <div class="overlayBadge loss">LEAVING NOW?</div>
-        </div>
+          <div class="overlayText">
+            <div class="overlayHeadline">Progress will be lost</div>
+            <div class="muted">
+              You’re currently in a fight. If you leave this page, the match will end and your animal will be healed.
+            </div>
+          </div>
 
-        <div class="overlayText">
-          <div class="overlayHeadline">Progress will be lost</div>
-          <div class="muted">
-            You’re currently in a fight. If you leave this page, the match will end and your animal will be healed.
+          <div class="overlayActions">
+            <button class="btn primary" type="button" @click="stayOnPage">Stay</button>
+            <button class="btn" type="button" @click="leaveAnyway">Leave Anyway</button>
           </div>
         </div>
-
-        <div class="overlayActions">
-          <button class="btn primary" type="button" @click="stayOnPage">Stay</button>
-          <button class="btn" type="button" @click="leaveAnyway">Leave Anyway</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- If no player, don't blank out -->
-    <div v-if="!player" class="panel" style="margin-top: 12px;">
-      <b>No player found.</b>
-      <div class="muted small" style="margin-top:6px;">
-        Go to the Stable and create/select a player first.
       </div>
 
-      <div style="margin-top: 12px;">
-        <button class="btn primary" type="button" @click="navigateTo('/stable')">
-          Go to Stable
-        </button>
-      </div>
-    </div>
-
-    <!-- DB warning -->
-    <div v-else-if="opponentsLoadErr" class="panel warn" style="margin-top: 12px;">
-      <b>DB Warning:</b> {{ opponentsLoadErr }}
-      <div class="muted small">You can still play — enemies will be generated locally.</div>
-    </div>
-
-    <!-- Choosing screen -->
-    <div v-if="player && choosing" class="panel" style="margin-top: 12px;">
-      <h3>Choose Your Animal</h3>
-
-      <div class="row">
-        <button
-          v-for="a in player.animals ?? []"
-          :key="a.id"
-          class="animalBtn"
-          :class="{ active: a.id === chosenId }"
-          @click="chosenId = a.id"
-          type="button"
-        >
-          <span class="name">{{ a.name }}</span>
-          <span class="small">{{ a.kind.toUpperCase() }} • HP {{ a.hpCurrent }}/{{ a.stats.hpMax }}</span>
-        </button>
-      </div>
-
-      <div style="margin-top: 12px; display:flex; gap:10px; flex-wrap:wrap;">
-        <button class="btn primary" :disabled="!chosenId" @click="startGauntlet" type="button">
-          Join the Fight
-        </button>
-        <button class="btn" type="button" @click="navigateTo('/stable')">
-          Back to Stable
-        </button>
-      </div>
-
-      <div v-if="(player.animals?.length ?? 0) === 0" class="muted small" style="margin-top: 10px;">
-        You don’t have any animals yet — go to the Stable to add one.
-      </div>
-    </div>
-
-    <!-- Battle screen -->
-    <div v-else-if="battle && playerAnimal" class="battleLayout">
-      <BattlePanel
-        :battle="battle"
-        :playerAnimal="playerAnimal"
-        :atkMult="atkMult"
-        :defMult="defMult"
-        :playerHit="playerHit"
-        :enemyHit="enemyHit"
-        :playerAttacking="playerAttacking"
-        :enemyAttacking="enemyAttacking"
-        :isAnimating="isAnimating"
-        :runGold="runGold"
-        :selectedBattleItem="selectedBattleItem"
-        :usableBattleItems="usableBattleItems"
-        :player="player"
-        @attack="stepTurn('attack')"
-        @defend="stepTurn('defend')"
-        @useItem="stepUseItem"
-        @reset="resetRun"
-        @update:selectedBattleItem="(val) => (selectedBattleItem = val)"
-      />
-
-      <div class="panel logPanel">
-        <h3>Battle Log</h3>
-        <div class="log">
-          <div v-for="(line, i) in battle.log" :key="i" class="logLine">{{ line }}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Stage Win overlay -->
-    <div v-if="stageOverlay" class="overlay" role="dialog" aria-modal="true">
-      <div class="overlayCard">
-        <div class="overlayTop">
-          <div class="overlayBadge win">STAGE CLEARED</div>
+      <!-- If no player -->
+      <div v-if="!player" class="panel">
+        <b>No player found.</b>
+        <div class="muted small" style="margin-top:6px;">
+          Go to the Stable and create/select a player first.
         </div>
 
-        <div class="overlaySprite" v-if="stageOverlaySpriteKind">
-          <img class="overlayImg" :src="spriteUrl(stageOverlaySpriteKind)" :alt="stageOverlaySpriteAlt" draggable="false" />
+        <div style="margin-top: 12px;">
+          <button class="btn primary" type="button" @click="navigateTo('/stable')">
+            Go to Stable
+          </button>
+        </div>
+      </div>
+
+      <!-- Choosing screen -->
+      <div v-else-if="choosing" class="panel">
+        <h3 class="panelTitle">Choose Your Animal</h3>
+
+        <div class="animalGrid">
+          <button
+            v-for="a in player.animals ?? []"
+            :key="a.id"
+            class="animalBtn"
+            :class="{ active: a.id === chosenId }"
+            @click="chosenId = a.id"
+            type="button"
+          >
+            <span class="name">{{ a.name }}</span>
+            <span class="small">{{ a.kind.toUpperCase() }} • HP {{ a.hpCurrent }}/{{ a.stats.hpMax }}</span>
+          </button>
         </div>
 
-        <div class="overlayText">
-          <div class="overlayHeadline">Boss Defeated!</div>
-          <div class="muted">
-            Stage reward: <b>${{ stageOverlay.stageReward }}</b><br />
-            Run total: <b>${{ stageOverlay.totalRunGold }}</b>
+        <div class="actionsRow">
+          <button class="btn primary" :disabled="!chosenId" @click="startGauntlet" type="button">
+            Join the Fight
+          </button>
+          <button class="btn" type="button" @click="navigateTo('/stable')">
+            Back to Stable
+          </button>
+        </div>
+
+        <div v-if="(player.animals?.length ?? 0) === 0" class="muted small" style="margin-top: 10px;">
+          You don’t have any animals yet — go to the Stable to add one.
+        </div>
+      </div>
+
+      <!-- Battle screen -->
+      <div v-else-if="battle && playerAnimal" class="battleArea">
+        <BattlePanel
+          :battle="battle"
+          :playerAnimal="playerAnimal"
+          :atkMult="atkMult"
+          :defMult="defMult"
+          :playerHit="playerHit"
+          :enemyHit="enemyHit"
+          :playerAttacking="playerAttacking"
+          :enemyAttacking="enemyAttacking"
+          :isAnimating="isAnimating"
+          :runGold="runGold"
+          :selectedBattleItem="selectedBattleItem"
+          :usableBattleItems="usableBattleItems"
+          :player="player"
+          @attack="stepTurn('attack')"
+          @defend="stepTurn('defend')"
+          @useItem="stepUseItem"
+          @reset="resetRun"
+          @update:selectedBattleItem="(val) => (selectedBattleItem = val)"
+        />
+      </div>
+
+      <!-- Stage Win overlay -->
+      <div v-if="stageOverlay" class="overlay" role="dialog" aria-modal="true">
+        <div class="overlayCard">
+          <div class="overlayTop">
+            <div class="overlayBadge win">STAGE CLEARED</div>
+          </div>
+
+          <div class="overlaySprite" v-if="stageOverlaySpriteKind">
+            <img class="overlayImg" :src="spriteUrl(stageOverlaySpriteKind)" :alt="stageOverlaySpriteAlt" draggable="false" />
+          </div>
+
+          <div class="overlayText">
+            <div class="overlayHeadline">Boss Defeated!</div>
+            <div class="muted">
+              Stage reward: <b>${{ stageOverlay.stageReward }}</b><br />
+              Run total: <b>${{ stageOverlay.totalRunGold }}</b>
+            </div>
+          </div>
+
+          <div class="overlayActions">
+            <button class="btn primary" @click="continueToNextStage" type="button">Continue</button>
+            <button class="btn" @click="dropOutWithWinnings" type="button">Drop Out</button>
           </div>
         </div>
-
-        <div class="overlayActions">
-          <button class="btn primary" @click="continueToNextStage" type="button">Continue</button>
-          <button class="btn" @click="dropOutWithWinnings" type="button">Drop Out</button>
-        </div>
       </div>
-    </div>
 
-    <!-- Final Result overlay -->
-    <div v-if="showOverlay" class="overlay" role="dialog" aria-modal="true">
-      <div class="overlayCard">
-        <div class="overlayTop">
-          <div class="overlayBadge" :class="{ win: result?.outcome === 'win', loss: result?.outcome === 'loss' }">
-            {{ overlayTitle }}
+      <!-- Final Result overlay -->
+      <div v-if="showOverlay" class="overlay" role="dialog" aria-modal="true">
+        <div class="overlayCard">
+          <div class="overlayTop">
+            <div class="overlayBadge" :class="{ win: result?.outcome === 'win', loss: result?.outcome === 'loss' }">
+              {{ overlayTitle }}
+            </div>
+          </div>
+
+          <div class="overlaySprite" v-if="overlaySpriteKind">
+            <img class="overlayImg" :src="spriteUrl(overlaySpriteKind)" :alt="overlaySpriteAlt" draggable="false" />
+          </div>
+
+          <div class="overlayText">
+            <div class="overlayHeadline">You {{ result?.outcome === 'win' ? 'Won!' : 'Lost!' }}</div>
+            <div class="muted">{{ result?.message }}</div>
+          </div>
+
+          <div class="overlayActions">
+            <button class="btn primary" @click="closeOverlayAndReset" type="button">Try Again</button>
+            <button class="btn" @click="closeOverlayBackToStable" type="button">Back to Stable</button>
           </div>
         </div>
+      </div>
 
-        <div class="overlaySprite" v-if="overlaySpriteKind">
-          <img class="overlayImg" :src="spriteUrl(overlaySpriteKind)" :alt="overlaySpriteAlt" draggable="false" />
-        </div>
-
-        <div class="overlayText">
-          <div class="overlayHeadline">You {{ result?.outcome === 'win' ? 'Won!' : 'Lost!' }}</div>
-          <div class="muted">{{ result?.message }}</div>
-        </div>
-
-        <div class="overlayActions">
-          <button class="btn primary" @click="closeOverlayAndReset" type="button">Try Again</button>
-          <button class="btn" @click="closeOverlayBackToStable" type="button">Back to Stable</button>
-        </div>
+      <!-- Tiny non-intrusive warning (no big banner) -->
+      <div v-if="opponentsLoadErr && !battle && !showOverlay && !stageOverlay" class="tinyWarn">
+        {{ opponentsLoadErr }}
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  padding: 18px;
+/* ✅ Full-height page and prevent extra scrolling */
+.page{
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  box-sizing: border-box;
 }
 
-.topRow{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-end;
+.container{
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  flex-wrap: wrap;
+}
+
+/* Minimal header */
+.header{
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.title{
+  margin: 0;
+  font-size: 22px;
+  font-weight: 1000;
+}
+.subtitle{
+  margin: 6px 0 0;
+  color: rgba(255,255,255,.70);
+  font-size: 13px;
+}
+
+/* Panels */
+.panel{
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+}
+.panelTitle{
+  margin: 0 0 8px;
+  font-size: 16px;
 }
 
 .muted { color: rgba(255, 255, 255, 0.70); }
 .small { font-size: 12px; }
 
-.panel {
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.04);
+/* Choose animal grid: compact to reduce scrolling */
+.animalGrid{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
-.panel.warn{
-  border-color: rgba(255, 200, 70, .25);
-  background: rgba(255, 200, 70, .06);
-}
-
-.row { display:flex; gap:14px; flex-wrap:wrap; margin-top:14px; }
 
 .animalBtn{
   width:100%;
   text-align:left;
   border-radius:14px;
   padding:10px 12px;
-  margin-top:10px;
   border:1px solid rgba(255,255,255,.12);
   background:rgba(255,255,255,.05);
   color:rgba(255,255,255,.92);
@@ -900,6 +900,23 @@ watchEffect(() => {
 }
 .name{ font-weight:900; display:block; }
 
+.actionsRow{
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.actionsRow .btn{
+  flex: 1 1 160px;
+}
+
+/* Battle area: keep tight */
+.battleArea{
+  display: flex;
+  justify-content: center;
+}
+
+/* Buttons */
 .btn{
   border-radius:14px;
   padding:10px 14px;
@@ -918,29 +935,17 @@ watchEffect(() => {
 }
 .btn:disabled{ opacity:.5; cursor:not-allowed; }
 
-.battleLayout{
-  display: grid;
-  gap: 14px;
-  margin-top: 14px;
+/* Tiny warning at bottom (doesn't push layout much) */
+.tinyWarn{
+  font-size: 12px;
+  color: rgba(255,255,255,.75);
+  border: 1px solid rgba(255, 200, 70, .25);
+  background: rgba(255, 200, 70, .06);
+  border-radius: 12px;
+  padding: 8px 10px;
 }
 
-.logPanel{ width: 100%; }
-.log{
-  margin-top: 10px;
-  max-height: 260px;
-  overflow: auto;
-  padding-right: 6px;
-}
-
-.logLine{
-  padding:8px 10px;
-  margin-top:8px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(0,0,0,.18);
-  overflow-wrap: anywhere;
-}
-
+/* Overlay (unchanged, already mobile-safe) */
 .overlay{
   position: fixed;
   inset: 0;
@@ -999,7 +1004,7 @@ watchEffect(() => {
 
 .overlayText{ margin-top: 8px; text-align:center; }
 .overlayHeadline{
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 1000;
   margin-bottom: 6px;
   overflow-wrap: anywhere;
@@ -1014,11 +1019,14 @@ watchEffect(() => {
 }
 
 @media (max-width: 420px){
-  .overlayCard{ width: 96vw; padding: 14px; }
+  .page{ padding: 10px; }
+  .container{ gap: 10px; }
+  .header{ padding: 10px; }
+  .title{ font-size: 20px; }
+  .subtitle{ font-size: 12px; }
+  .overlayHeadline{ font-size: 20px; }
   .overlayImg{ width: 120px; height: 120px; }
-  .overlayHeadline{ font-size: 22px; }
-  .overlayActions{ gap: 8px; }
-  .overlayActions .btn{ flex: 1 1 140px; max-width: 100%; }
+  .overlayActions .btn{ flex: 1 1 140px; }
 }
 
 @keyframes bob{

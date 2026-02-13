@@ -41,127 +41,130 @@ function handleItemSelect(event: Event) {
 </script>
 
 <template>
-  <div class="panel battlePanel">
-    <!-- Header -->
-    <div class="battleHeader">
-      <h3>Stage {{ battle.stage }} • Round {{ battle.round }}</h3>
+  <!-- ✅ Center wrapper -->
+  <div class="battleWrapper">
+    <div class="panel battlePanel">
+      <!-- Header -->
+      <div class="battleHeader">
+        <h3>Stage {{ battle.stage }} • Round {{ battle.round }}</h3>
 
-      <div class="rightHeader">
-        <div class="pill muted small">Run: <b>${{ runGold }}</b></div>
+        <div class="rightHeader">
+          <div class="pill muted small">Run: <b>${{ runGold }}</b></div>
 
-        <div class="pill muted small" v-if="atkMult > 1 || defMult > 1">
-          Buffs:
-          <span v-if="atkMult > 1"><b>ATK×{{ atkMult }}</b></span>
-          <span v-if="atkMult > 1 && defMult > 1"> • </span>
-          <span v-if="defMult > 1"><b>DEF×{{ defMult }}</b></span>
-          <span class="muted"> (ends after this boss)</span>
+          <div class="pill muted small" v-if="atkMult > 1 || defMult > 1">
+            Buffs:
+            <span v-if="atkMult > 1"><b>ATK×{{ atkMult }}</b></span>
+            <span v-if="atkMult > 1 && defMult > 1"> • </span>
+            <span v-if="defMult > 1"><b>DEF×{{ defMult }}</b></span>
+            <span class="muted"> (ends after this boss)</span>
+          </div>
+
+          <button class="btn" @click="emit('reset')" type="button">Reset</button>
         </div>
-
-        <button class="btn" @click="emit('reset')" type="button">Reset</button>
       </div>
-    </div>
 
-    <!-- Arena -->
-    <div class="arena">
-      <!-- Player (LEFT) -->
-      <div class="fighter left">
-        <div class="label muted small">You</div>
+      <!-- Arena -->
+      <div class="arena">
+        <!-- Player (LEFT) -->
+        <div class="fighter left">
+          <div class="label muted small">You</div>
 
-        <!-- Lunge wrapper -->
-        <div class="lungeWrap" :class="{ lungeRight: playerAttacking }">
-          <div class="spriteBlock" :class="{ hit: playerHit }">
-            <img
-              class="spriteImg"
-              :src="spriteUrl(playerAnimal.kind)"
-              :alt="playerAnimal.name"
-              draggable="false"
+          <!-- Lunge wrapper -->
+          <div class="lungeWrap" :class="{ lungeRight: playerAttacking }">
+            <div class="spriteBlock" :class="{ hit: playerHit }">
+              <img
+                class="spriteImg"
+                :src="spriteUrl(playerAnimal.kind)"
+                :alt="playerAnimal.name"
+                draggable="false"
+              />
+            </div>
+          </div>
+
+          <div class="hpBar">
+            <div
+              class="hpFill"
+              :style="{ width: hpPercent(playerAnimal.hpCurrent, playerAnimal.stats.hpMax) + '%' }"
             />
+          </div>
+
+          <div class="hpText muted small">
+            {{ playerAnimal.name }} • {{ playerAnimal.hpCurrent }}/{{ playerAnimal.stats.hpMax }}
           </div>
         </div>
 
-        <div class="hpBar">
-          <div
-            class="hpFill"
-            :style="{ width: hpPercent(playerAnimal.hpCurrent, playerAnimal.stats.hpMax) + '%' }"
-          />
-        </div>
+        <div class="vs">VS</div>
 
-        <div class="hpText muted small">
-          {{ playerAnimal.name }} • {{ playerAnimal.hpCurrent }}/{{ playerAnimal.stats.hpMax }}
-        </div>
-      </div>
+        <!-- Enemy (RIGHT) -->
+        <div class="fighter right">
+          <div class="label muted small">Enemy</div>
 
-      <div class="vs">VS</div>
+          <!-- Lunge wrapper -->
+          <div class="lungeWrap" :class="{ lungeLeft: enemyAttacking }">
+            <div class="spriteBlock enemy" :class="{ hit: enemyHit }">
+              <img
+                class="spriteImg flip"
+                :src="spriteUrl(battle.enemy.kind)"
+                :alt="battle.enemy.name"
+                draggable="false"
+              />
+            </div>
+          </div>
 
-      <!-- Enemy (RIGHT) -->
-      <div class="fighter right">
-        <div class="label muted small">Enemy</div>
-
-        <!-- Lunge wrapper -->
-        <div class="lungeWrap" :class="{ lungeLeft: enemyAttacking }">
-          <div class="spriteBlock enemy" :class="{ hit: enemyHit }">
-            <img
-              class="spriteImg flip"
-              :src="spriteUrl(battle.enemy.kind)"
-              :alt="battle.enemy.name"
-              draggable="false"
+          <div class="hpBar">
+            <div
+              class="hpFill"
+              :style="{ width: hpPercent(battle.enemy.hpCurrent, battle.enemy.stats.hpMax) + '%' }"
             />
           </div>
-        </div>
 
-        <div class="hpBar">
-          <div
-            class="hpFill"
-            :style="{ width: hpPercent(battle.enemy.hpCurrent, battle.enemy.stats.hpMax) + '%' }"
-          />
-        </div>
-
-        <div class="hpText muted small">
-          {{ battle.enemy.name }} • {{ battle.enemy.hpCurrent }}/{{ battle.enemy.stats.hpMax }}
+          <div class="hpText muted small">
+            {{ battle.enemy.name }} • {{ battle.enemy.hpCurrent }}/{{ battle.enemy.stats.hpMax }}
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Controls -->
-    <div class="actions" v-if="!battle.ended">
-      <button class="btn primary" @click="emit('attack')" type="button" :disabled="isAnimating">
-        Attack
-      </button>
-
-      <button class="btn" @click="emit('defend')" type="button" :disabled="isAnimating">
-        Defend
-      </button>
-
-      <!-- Use Item -->
-      <div class="itemControls">
-        <select
-          class="select"
-          :value="selectedBattleItem"
-          @change="handleItemSelect"
-          :disabled="isAnimating || usableBattleItems.length === 0"
-        >
-          <option value="" disabled>
-            {{ usableBattleItems.length === 0 ? 'No battle items' : 'Choose battle item' }}
-          </option>
-
-          <option v-for="it in usableBattleItems" :key="it.kind" :value="it.kind">
-            {{ it.name }} (x{{ player?.inventory?.[it.kind] ?? 0 }})
-          </option>
-        </select>
-
-        <button
-          class="btn"
-          @click="emit('useItem')"
-          type="button"
-          :disabled="isAnimating || !selectedBattleItem || usableBattleItems.length === 0"
-        >
-          Use Item
+      <!-- Controls -->
+      <div class="actions" v-if="!battle.ended">
+        <button class="btn primary" @click="emit('attack')" type="button" :disabled="isAnimating">
+          Attack
         </button>
-      </div>
-    </div>
 
-    <div class="muted small itemHint" v-if="!battle.ended">
-      Bandage/Medkit keep the HP. Attack/Defense pills wear off after this boss fight ends.
+        <button class="btn" @click="emit('defend')" type="button" :disabled="isAnimating">
+          Defend
+        </button>
+
+        <!-- Use Item -->
+        <div class="itemControls">
+          <select
+            class="select"
+            :value="selectedBattleItem"
+            @change="handleItemSelect"
+            :disabled="isAnimating || usableBattleItems.length === 0"
+          >
+            <option value="" disabled>
+              {{ usableBattleItems.length === 0 ? 'No battle items' : 'Choose battle item' }}
+            </option>
+
+            <option v-for="it in usableBattleItems" :key="it.kind" :value="it.kind">
+              {{ it.name }} (x{{ player?.inventory?.[it.kind] ?? 0 }})
+            </option>
+          </select>
+
+          <button
+            class="btn"
+            @click="emit('useItem')"
+            type="button"
+            :disabled="isAnimating || !selectedBattleItem || usableBattleItems.length === 0"
+          >
+            Use Item
+          </button>
+        </div>
+      </div>
+
+      <div class="muted small itemHint" v-if="!battle.ended">
+        Bandage/Medkit keep the HP. Attack/Defense pills wear off after this boss fight ends.
+      </div>
     </div>
   </div>
 </template>
@@ -170,6 +173,15 @@ function handleItemSelect(event: Event) {
 .muted { color: rgba(255, 255, 255, 0.70); }
 .small { font-size: 12px; }
 
+/* ✅ Center the panel on the page */
+.battleWrapper{
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0 12px; /* prevents edge-clipping on small screens */
+  box-sizing: border-box;
+}
+
 .panel {
   padding: 14px;
   border-radius: 16px;
@@ -177,7 +189,13 @@ function handleItemSelect(event: Event) {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.battlePanel { width: 100%; }
+/* ✅ Constrain width so it doesn't feel skewed on large displays */
+.battlePanel{
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
 
 .battleHeader {
   display: flex;
