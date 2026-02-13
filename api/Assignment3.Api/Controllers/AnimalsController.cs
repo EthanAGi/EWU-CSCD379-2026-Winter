@@ -31,6 +31,15 @@ public class AnimalsController : ControllerBase
         return Ok(animals);
     }
 
+    // ✅ GET /api/animals/opponents/{playerId}
+    // Returns animals owned by OTHER players (not the current player)
+    [HttpGet("opponents/{playerId}")]
+    public async Task<ActionResult<List<PlayerAnimal>>> GetOpponents(string playerId)
+    {
+        var animals = await _animals.GetOpponentAnimalsAsync(playerId);
+        return Ok(animals);
+    }
+
     // POST /api/animals/claim
     // { ownerPlayerId, ownerName, kind, name }
     public record ClaimAnimalRequest(string OwnerPlayerId, string OwnerName, string Kind, string? Name);

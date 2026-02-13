@@ -32,23 +32,12 @@ const playerAnimal = computed(() => {
 })
 
 /** -------------------------------------------------------
- *  Pull possible opponents from the DATABASE (API)
- *  - Base animals (templates)   GET  {apiBase}/api/animals/templates
- *  - Player animals (your DB)   GET  {apiBase}/api/animals/player/{playerId}
+ *  ✅ NEW: Pull opponents from API in one call
+ *  GET  {apiBase}/api/animals/opponents/{playerId}
  *  ------------------------------------------------------*/
 
-type AnimalTemplateDto = {
-  id: number
-  kind: string
-  attack: number
-  defense: number
-  affection: number
-  level: number
-  hpMax: number
-}
-
-type PlayerAnimalDto = {
-  id: number
+type OpponentDto = {
+  id: string | number
   ownerPlayerId: string
   ownerName: string
   name: string
@@ -58,43 +47,28 @@ type PlayerAnimalDto = {
   affection: number
   level: number
   hpMax: number
-  hpCurrent: number
-  createdAt: string
-  templateId: number
+  hpCurrent?: number | null
 }
 
-const templatesDb = ref<AnimalTemplateDto[]>([])
-const playerAnimalsDb = ref<PlayerAnimalDto[]>([])
 const opponentsPool = ref<Animal[]>([])
 const opponentsLoaded = ref(false)
 const opponentsLoadErr = ref<string | null>(null)
 
-function titleCase(s: string) {
-  if (!s) return s
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
-function dtoToAnimalFromTemplate(t: AnimalTemplateDto): Animal {
-  const base = { ownerPlayerId: 'npc', ownerName: 'Wilds' }
+function dtoToAnimal(dto: OpponentDto): Animal {
   return {
-    id: `tpl-${t.id}`,
-    ...base,
-    name: titleCase(t.kind),
-    kind: t.kind as any,
-    stats: { attack: t.attack, defense: t.defense, affection: t.affection, level: t.level, hpMax: t.hpMax },
-    hpCurrent: t.hpMax,
-  }
-}
-
-function dtoToAnimalFromPlayer(a: PlayerAnimalDto): Animal {
-  return {
-    id: `pa-${a.id}`,
-    ownerPlayerId: a.ownerPlayerId,
-    ownerName: a.ownerName,
-    name: a.name,
-    kind: a.kind as any,
-    stats: { attack: a.attack, defense: a.defense, affection: a.affection, level: a.level, hpMax: a.hpMax },
-    hpCurrent: a.hpCurrent,
+    id: String(dto.id),
+    ownerPlayerId: dto.ownerPlayerId,
+    ownerName: dto.ownerName,
+    name: dto.name,
+    kind: dto.kind as any,
+    stats: {
+      attack: dto.attack,
+      defense: dto.defense,
+      affection: dto.affection,
+      level: dto.level,
+      hpMax: dto.hpMax,
+    },
+    hpCurrent: dto.hpCurrent ?? dto.hpMax,
   }
 }
 
@@ -102,7 +76,7 @@ function cloneAnimal(a: Animal): Animal {
   return { ...a, stats: { ...a.stats } }
 }
 
-/** Load DB animals once the player exists */
+/** Load opponents once the player exists */
 async function loadOpponentsFromDb() {
   if (!player.value) return
   if (opponentsLoaded.value) return
@@ -113,23 +87,18 @@ async function loadOpponentsFromDb() {
     const apiBase = (config.public.apiBase ?? '').toString().replace(/\/+$/, '')
     if (!apiBase) throw new Error('Missing runtimeConfig.public.apiBase')
 
-    const templatesUrl = `${apiBase}/api/animals/templates`
-    const playerAnimalsUrl = `${apiBase}/api/animals/player/${encodeURIComponent(player.value.id)}`
+    // ✅ NEW endpoint
+    const url = `${apiBase}/api/animals/opponents/${encodeURIComponent(player.value.id)}`
+    const list = await $fetch<OpponentDto[]>(url)
 
-    const [tpls, pAnimals] = await Promise.all([
-      $fetch<AnimalTemplateDto[]>(templatesUrl),
-      $fetch<PlayerAnimalDto[]>(playerAnimalsUrl),
-    ])
-
-    templatesDb.value = Array.isArray(tpls) ? tpls : []
-    playerAnimalsDb.value = Array.isArray(pAnimals) ? pAnimals : []
-
-    opponentsPool.value = [
-      ...templatesDb.value.map(dtoToAnimalFromTemplate),
-      ...playerAnimalsDb.value.map(dtoToAnimalFromPlayer),
-    ]
-
+    const arr = Array.isArray(list) ? list : []
+    opponentsPool.value = arr.map(dtoToAnimal)
     opponentsLoaded.value = true
+
+    // If API returns nothing, still treat it as loaded (we'll fall back per-pick)
+    if (opponentsPool.value.length === 0) {
+      opponentsLoadErr.value = 'No opponents returned from API. Using local enemies.'
+    }
   } catch (e: any) {
     console.error('Failed to load opponents from DB:', e)
     opponentsLoadErr.value = 'Could not load enemies from the database. Using local enemies.'
@@ -494,38 +463,29 @@ function applyBattleItem(kind: ItemKind) {
   if (!b || !p) return
 
   const ok = consumeItem(kind)
-  if (!ok) {
-    b.log.unshift('No item available.')
-    return
-  }
+  if (!ok) return
 
   if (kind === 'bandage') {
     const heal = Math.ceil(p.stats.hpMax * 0.3)
     p.hpCurrent = Math.min(p.stats.hpMax, p.hpCurrent + heal)
-    b.log.unshift(`You used a Bandage and healed ${heal} HP.`)
     return
   }
 
   if (kind === 'medkit') {
     const heal = Math.ceil(p.stats.hpMax * 0.7)
     p.hpCurrent = Math.min(p.stats.hpMax, p.hpCurrent + heal)
-    b.log.unshift(`You used a Medkit and healed ${heal} HP.`)
     return
   }
 
   if (kind === 'attackPill') {
     atkMult.value = 2
-    b.log.unshift('You used an Attack Boost Pill. Your attack is doubled for this boss fight.')
     return
   }
 
   if (kind === 'defensePill') {
     defMult.value = 2
-    b.log.unshift('You used a Defense Boost Pill. Your defense is doubled for this boss fight.')
     return
   }
-
-  b.log.unshift('That item has no effect yet.')
 }
 
 /** Main turn step */
@@ -541,9 +501,6 @@ function stepTurn(playerMove: BattleMove) {
 
   b.playerDefending = playerMove === 'defend'
   b.enemyDefending = enemyMove === 'defend'
-
-  // Keep minimal log (still used internally; UI log removed)
-  b.log.unshift(`Round ${b.round}: You chose ${playerMove.toUpperCase()}, enemy chose ${enemyMove.toUpperCase()}.`)
 
   if (playerMove === 'defend' && enemyMove === 'defend') {
     b.round++
@@ -573,11 +530,7 @@ function stepTurn(playerMove: BattleMove) {
     }
 
     resetBattleBuffs()
-    stageOverlay.value = {
-      stageCleared: b.stage,
-      stageReward,
-      totalRunGold: runGold.value,
-    }
+    stageOverlay.value = { stageCleared: b.stage, stageReward, totalRunGold: runGold.value }
     return
   }
 
@@ -636,10 +589,6 @@ function stepUseItem() {
   b.round++
 }
 
-/**
- * ✅ IMPORTANT:
- * BattlePanel can emit reset with args, and Vue passes them through.
- */
 function resetRun(..._args: any[]) {
   battle.value = null
   result.value = null
@@ -665,16 +614,13 @@ watchEffect(() => {
 </script>
 
 <template>
-  <!-- ✅ Full-height, no-scroll layout -->
   <section class="page">
     <div class="container">
-      <!-- Minimal header (no API text) -->
       <div class="header">
         <h1 class="title">Gauntlet</h1>
         <p class="subtitle">Fight 3 boss battles. Each turn: Attack, Defend, or Use Item.</p>
       </div>
 
-      <!-- ✅ Leave warning modal -->
       <div v-if="leaveModalOpen" class="overlay" role="dialog" aria-modal="true">
         <div class="overlayCard">
           <div class="overlayTop">
@@ -695,7 +641,6 @@ watchEffect(() => {
         </div>
       </div>
 
-      <!-- If no player -->
       <div v-if="!player" class="panel">
         <b>No player found.</b>
         <div class="muted small" style="margin-top:6px;">
@@ -709,7 +654,6 @@ watchEffect(() => {
         </div>
       </div>
 
-      <!-- Choosing screen -->
       <div v-else-if="choosing" class="panel">
         <h3 class="panelTitle">Choose Your Animal</h3>
 
@@ -741,7 +685,6 @@ watchEffect(() => {
         </div>
       </div>
 
-      <!-- Battle screen -->
       <div v-else-if="battle && playerAnimal" class="battleArea">
         <BattlePanel
           :battle="battle"
@@ -765,7 +708,6 @@ watchEffect(() => {
         />
       </div>
 
-      <!-- Stage Win overlay -->
       <div v-if="stageOverlay" class="overlay" role="dialog" aria-modal="true">
         <div class="overlayCard">
           <div class="overlayTop">
@@ -791,7 +733,6 @@ watchEffect(() => {
         </div>
       </div>
 
-      <!-- Final Result overlay -->
       <div v-if="showOverlay" class="overlay" role="dialog" aria-modal="true">
         <div class="overlayCard">
           <div class="overlayTop">
@@ -816,7 +757,6 @@ watchEffect(() => {
         </div>
       </div>
 
-      <!-- Tiny non-intrusive warning (no big banner) -->
       <div v-if="opponentsLoadErr && !battle && !showOverlay && !stageOverlay" class="tinyWarn">
         {{ opponentsLoadErr }}
       </div>
@@ -825,7 +765,6 @@ watchEffect(() => {
 </template>
 
 <style scoped>
-/* ✅ Full-height page and prevent extra scrolling */
 .page{
   min-height: 100vh;
   display: flex;
@@ -842,7 +781,6 @@ watchEffect(() => {
   gap: 12px;
 }
 
-/* Minimal header */
 .header{
   padding: 10px 12px;
   border-radius: 16px;
@@ -860,7 +798,6 @@ watchEffect(() => {
   font-size: 13px;
 }
 
-/* Panels */
 .panel{
   padding: 12px;
   border-radius: 16px;
@@ -875,7 +812,6 @@ watchEffect(() => {
 .muted { color: rgba(255, 255, 255, 0.70); }
 .small { font-size: 12px; }
 
-/* Choose animal grid: compact to reduce scrolling */
 .animalGrid{
   display: grid;
   grid-template-columns: 1fr;
@@ -910,13 +846,11 @@ watchEffect(() => {
   flex: 1 1 160px;
 }
 
-/* Battle area: keep tight */
 .battleArea{
   display: flex;
   justify-content: center;
 }
 
-/* Buttons */
 .btn{
   border-radius:14px;
   padding:10px 14px;
@@ -935,7 +869,6 @@ watchEffect(() => {
 }
 .btn:disabled{ opacity:.5; cursor:not-allowed; }
 
-/* Tiny warning at bottom (doesn't push layout much) */
 .tinyWarn{
   font-size: 12px;
   color: rgba(255,255,255,.75);
@@ -945,7 +878,6 @@ watchEffect(() => {
   padding: 8px 10px;
 }
 
-/* Overlay (unchanged, already mobile-safe) */
 .overlay{
   position: fixed;
   inset: 0;

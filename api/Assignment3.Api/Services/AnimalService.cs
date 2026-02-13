@@ -22,16 +22,23 @@ public class AnimalService : IAnimalService
 
     public async Task<List<PlayerAnimal>> GetPlayerAnimalsAsync(string playerId)
     {
-        // You can optionally validate playerId, but leaving it permissive is fine.
         return await _db.PlayerAnimals
             .Where(a => a.OwnerPlayerId == playerId)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
     }
 
+    // ✅ NEW: return animals owned by OTHER players
+    public async Task<List<PlayerAnimal>> GetOpponentAnimalsAsync(string playerId)
+    {
+        return await _db.PlayerAnimals
+            .Where(a => a.OwnerPlayerId != playerId)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync();
+    }
+
     public async Task<PlayerAnimal> ClaimAsync(string ownerPlayerId, string ownerName, string kindRaw, string? name)
     {
-        // Validation -> 400
         if (string.IsNullOrWhiteSpace(ownerPlayerId))
             throw new ArgumentException("OwnerPlayerId is required.");
 
@@ -43,12 +50,12 @@ public class AnimalService : IAnimalService
 
         var kind = kindRaw.Trim().ToLowerInvariant();
 
-        // Template must exist -> 404
-        var template = await _db.AnimalTemplates.FirstOrDefaultAsync(t => t.Kind == kind);
+        var template = await _db.AnimalTemplates
+            .FirstOrDefaultAsync(t => t.Kind == kind);
+
         if (template is null)
             throw new KeyNotFoundException($"No template for kind '{kind}'");
 
-        // Rule: only one of each kind per player -> 409
         var alreadyOwns = await _db.PlayerAnimals.AnyAsync(a =>
             a.OwnerPlayerId == ownerPlayerId && a.Kind == kind);
 
