@@ -41,19 +41,17 @@ const isSaving = computed(() => savingStarter.value !== null)
 
 /**
  * ----------------------------
- * Leave behavior
- * - Block route changes while choosing starter OR saving starter
+ * Starter stage lock
  * ----------------------------
  */
 const inStarterStage = computed(() => stage.value === 'starter')
 
+/**
+ * Block ALL route changes while choosing starter (or saving)
+ * This prevents clicking Reviews / Stable / Shop AND manual URL changes.
+ */
 onBeforeRouteLeave((to, from, next) => {
-  // Block leaving while in starter stage (even before saving starts)
-  if (inStarterStage.value) return next(false)
-
-  // Also block if somehow a save is in progress
-  if (isSaving.value) return next(false)
-
+  if (inStarterStage.value || isSaving.value) return next(false)
   if (to.fullPath === from.fullPath) return next()
   next()
 })
@@ -122,10 +120,18 @@ async function pickStarter(kind: AnimalKind) {
 
 <template>
   <section class="wrap">
-    <!-- ✅ Hide nav entirely while choosing starter -->
-    <nav v-if="stage !== 'starter'" class="nav">
+    <!-- ✅ Navbar always present, but EVERYTHING is disabled during starter selection -->
+    <nav class="nav" :class="{ locked: inStarterStage || isSaving }" aria-label="Top navigation">
       <div class="navLeft">
-        <NuxtLink class="navBtn" to="/reviews">
+        <!-- Reviews: disable during starter selection -->
+        <NuxtLink
+          class="navBtn"
+          to="/reviews"
+          :class="{ disabled: inStarterStage || isSaving }"
+          :tabindex="(inStarterStage || isSaving) ? -1 : 0"
+          :aria-disabled="(inStarterStage || isSaving) ? 'true' : 'false'"
+          @click.prevent="(inStarterStage || isSaving) ? true : false"
+        >
           Reviews
         </NuxtLink>
 
@@ -135,6 +141,10 @@ async function pickStarter(kind: AnimalKind) {
             to="/stable"
             aria-label="Stable"
             title="Stable"
+            :class="{ disabled: inStarterStage || isSaving }"
+            :tabindex="(inStarterStage || isSaving) ? -1 : 0"
+            :aria-disabled="(inStarterStage || isSaving) ? 'true' : 'false'"
+            @click.prevent="(inStarterStage || isSaving) ? true : false"
           >
             <svg
               class="navIcon"
@@ -157,6 +167,10 @@ async function pickStarter(kind: AnimalKind) {
             to="/shop"
             aria-label="Shop"
             title="Shop"
+            :class="{ disabled: inStarterStage || isSaving }"
+            :tabindex="(inStarterStage || isSaving) ? -1 : 0"
+            :aria-disabled="(inStarterStage || isSaving) ? 'true' : 'false'"
+            @click.prevent="(inStarterStage || isSaving) ? true : false"
           >
             <svg
               class="navIcon"
@@ -210,7 +224,6 @@ async function pickStarter(kind: AnimalKind) {
         {{ starterMsg }}
       </p>
 
-      <!-- Optional: small hint so user understands why they can't navigate -->
       <p v-if="stage === 'starter'" class="muted small" style="margin-top: 12px;">
         Choose a starter to continue. Navigation is disabled on this step.
       </p>
@@ -263,6 +276,13 @@ async function pickStarter(kind: AnimalKind) {
 .navIcon {
   width: 18px;
   height: 18px;
+}
+
+/* ✅ Real disable: no clicks + visually muted */
+.navBtn.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
 }
 
 .card {
