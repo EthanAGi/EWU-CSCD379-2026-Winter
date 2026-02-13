@@ -41,18 +41,26 @@ const isSaving = computed(() => savingStarter.value !== null)
 
 /**
  * ----------------------------
- * Leave behavior (NO modal during starter save)
+ * Leave behavior
+ * - Block route changes while choosing starter OR saving starter
  * ----------------------------
  */
+const inStarterStage = computed(() => stage.value === 'starter')
+
 onBeforeRouteLeave((to, from, next) => {
-  if (!isSaving.value) return next()
+  // Block leaving while in starter stage (even before saving starts)
+  if (inStarterStage.value) return next(false)
+
+  // Also block if somehow a save is in progress
+  if (isSaving.value) return next(false)
+
   if (to.fullPath === from.fullPath) return next()
-  next(false)
+  next()
 })
 
-/** Browser refresh/close warning while saving (best-effort) */
+/** Browser refresh/close warning while in starter stage or saving (best-effort) */
 function handleBeforeUnload(e: BeforeUnloadEvent) {
-  if (!isSaving.value) return
+  if (!inStarterStage.value && !isSaving.value) return
   e.preventDefault()
   e.returnValue = ''
 }
@@ -110,30 +118,21 @@ async function pickStarter(kind: AnimalKind) {
     savingStarter.value = null
   }
 }
-
-/** Disable nav buttons while saving */
-const navDisabled = computed(() => isSaving.value)
 </script>
 
 <template>
   <section class="wrap">
-    <nav class="nav">
+    <!-- ✅ Hide nav entirely while choosing starter -->
+    <nav v-if="stage !== 'starter'" class="nav">
       <div class="navLeft">
-        <NuxtLink
-          class="navBtn"
-          :class="{ disabled: navDisabled }"
-          to="/reviews"
-          :tabindex="navDisabled ? -1 : 0"
-        >
+        <NuxtLink class="navBtn" to="/reviews">
           Reviews
         </NuxtLink>
 
         <template v-if="player">
           <NuxtLink
             class="navBtn iconOnly"
-            :class="{ disabled: navDisabled }"
             to="/stable"
-            :tabindex="navDisabled ? -1 : 0"
             aria-label="Stable"
             title="Stable"
           >
@@ -155,9 +154,7 @@ const navDisabled = computed(() => isSaving.value)
 
           <NuxtLink
             class="navBtn iconOnly"
-            :class="{ disabled: navDisabled }"
             to="/shop"
-            :tabindex="navDisabled ? -1 : 0"
             aria-label="Shop"
             title="Shop"
           >
@@ -212,6 +209,11 @@ const navDisabled = computed(() => isSaving.value)
       <p v-if="starterMsg" class="muted" style="margin-top: 12px;">
         {{ starterMsg }}
       </p>
+
+      <!-- Optional: small hint so user understands why they can't navigate -->
+      <p v-if="stage === 'starter'" class="muted small" style="margin-top: 12px;">
+        Choose a starter to continue. Navigation is disabled on this step.
+      </p>
     </section>
   </section>
 </template>
@@ -263,11 +265,6 @@ const navDisabled = computed(() => isSaving.value)
   height: 18px;
 }
 
-.navBtn.disabled {
-  opacity: 0.45;
-  pointer-events: none;
-}
-
 .card {
   border: none;
   border-radius: 18px;
@@ -279,6 +276,8 @@ const navDisabled = computed(() => isSaving.value)
 .muted {
   color: rgba(255, 255, 255, 0.7);
 }
+
+.small { font-size: 12px; }
 
 .row {
   display: flex;
