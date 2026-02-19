@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "assignment4", "assignment4", "{6D2A3F59-7BE5-5EEE-E4B6-60E880039DEC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend", "backend", "{55907E9D-6AE4-759B-1951-FF4B5C87463D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MortuaryAssistant.Api", "assignment4\backend\MortuaryAssistant.Api\MortuaryAssistant.Api.csproj", "{6DE8201E-ABA2-B718-9309-0FA13A09EF9D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6DE8201E-ABA2-B718-9309-0FA13A09EF9D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6DE8201E-ABA2-B718-9309-0FA13A09EF9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6DE8201E-ABA2-B718-9309-0FA13A09EF9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6DE8201E-ABA2-B718-9309-0FA13A09EF9D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{55907E9D-6AE4-759B-1951-FF4B5C87463D} = {6D2A3F59-7BE5-5EEE-E4B6-60E880039DEC}
+		{6DE8201E-ABA2-B718-9309-0FA13A09EF9D} = {55907E9D-6AE4-759B-1951-FF4B5C87463D}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2989A67F-FC7A-484B-BA72-7415483D2025}
+	EndGlobalSection
+EndGlobal
