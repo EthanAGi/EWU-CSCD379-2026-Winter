@@ -27,7 +27,7 @@ import { useRouter } from "vue-router"
 import { useAuth } from "../../composables/useAuth"
 
 const router = useRouter()
-const { login } = useAuth()
+const { login, fetchMe } = useAuth()
 
 const email = ref("")
 const password = ref("")
@@ -38,9 +38,15 @@ async function onSubmit() {
   err.value = null
   loading.value = true
   try {
+    // ✅ login() already uses the new apiUrl(...) logic inside useAuth
     await login(email.value, password.value)
+
+    // ✅ populate roles/user right away (helps gated pages)
+    await fetchMe()
+
     await router.push("/public")
   } catch (e: any) {
+    // ofetch errors often put server payload on e.data
     err.value = e?.data?.message || e?.message || "Login failed."
   } finally {
     loading.value = false

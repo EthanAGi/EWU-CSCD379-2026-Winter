@@ -30,7 +30,7 @@ import { useRouter } from "vue-router"
 import { useAuth } from "../../composables/useAuth"
 
 const router = useRouter()
-const { register } = useAuth()
+const { register, fetchMe } = useAuth()
 
 const email = ref("")
 const password = ref("")
@@ -43,7 +43,12 @@ async function onSubmit() {
   err.value = null
   loading.value = true
   try {
+    // ✅ register() already uses the new apiUrl(...) logic inside useAuth
     await register(email.value, password.value, displayName.value || undefined)
+
+    // ✅ populate roles/user immediately (helps gated pages)
+    await fetchMe()
+
     await router.push("/public")
   } catch (e: any) {
     err.value = e?.data?.message || e?.message || "Registration failed."

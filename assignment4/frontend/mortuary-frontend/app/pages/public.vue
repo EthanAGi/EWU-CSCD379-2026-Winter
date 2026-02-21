@@ -182,6 +182,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { $fetch } from "ofetch"
+import { useRuntimeConfig } from "#imports"
 import { useAuth } from "../../composables/useAuth"
 
 /** -----------------------------
@@ -271,6 +272,20 @@ type CaseDetailsDto = {
 }
 
 /** -----------------------------
+ * API base helper (DEV + PROD)
+ * ----------------------------- */
+const config = useRuntimeConfig()
+const apiBase = computed(() => {
+  const raw = (config.public.apiBase as unknown as string) || ""
+  return raw.replace(/\/+$/, "")
+})
+
+function apiUrl(path: string) {
+  const p = path.startsWith("/") ? path : `/${path}`
+  return apiBase.value ? `${apiBase.value}${p}` : p
+}
+
+/** -----------------------------
  * Auth (from your composable)
  * ----------------------------- */
 const { token, roles, isLoggedIn, loadFromStorage, fetchMe } = useAuth()
@@ -343,7 +358,8 @@ async function loadPublicList() {
   errorMessage.value = null
 
   try {
-    cases.value = await $fetch<PublicCase[]>("/api/public/cases")
+    // ✅ FIX: use apiUrl so prod calls your App Service, not SWA /api
+    cases.value = await $fetch<PublicCase[]>(apiUrl("/api/public/cases"))
   } catch (e: any) {
     errorMessage.value = e?.data?.message || e?.message || "Failed to load cases."
     cases.value = []
@@ -352,17 +368,6 @@ async function loadPublicList() {
   }
 }
 
-/**
- * ✅ FIX:
- * The /api/public/cases/{caseNumber} endpoint likely still uses the old EF navigation (AssignedMortician)
- * and returns assignedMorticianUserId but assignedMortician object is null.
- *
- * So we:
- * 1) Try fetching details (for decedent name).
- * 2) Separately call /api/cases/{caseNumber} (the fixed controller) to get assignedMortician reliably.
- *
- * Both calls are protected, so they only run for Admin/Mortician.
- */
 async function loadVerboseExtras() {
   if (!canSeeVerbose.value) {
     verboseByCase.value = {}
@@ -378,8 +383,8 @@ async function loadVerboseExtras() {
   await Promise.all(
     (cases.value ?? []).map(async (c) => {
       try {
-        // 1) public-details endpoint (for decedent/tasks/etc)
-        const d = await $fetch<CaseDetailsDto>(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`, {
+        // 1) public-details endpoint (protected)
+        const d = await $fetch<CaseDetailsDto>(apiUrl(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`), {
           headers: authHeaders(),
         })
 
@@ -387,19 +392,18 @@ async function loadVerboseExtras() {
         const last = d.decedent?.lastName?.trim() ?? ""
         const decedentName = (first + " " + last).trim() || "—"
 
-        // 2) reliable assigned mortician from /api/cases/{caseNumber} (your fixed controller)
+        // 2) reliable assigned mortician from /api/cases/{caseNumber}
         let assigned: MorticianLite | null = null
         let assignedUserId: string | null = (d.assignedMorticianUserId ?? null) as any
 
         try {
           const fixed = await $fetch<{ assignedMortician: MorticianLite | null; assignedMorticianUserId?: string | null }>(
-            `/api/cases/${encodeURIComponent(c.caseNumber)}`,
+            apiUrl(`/api/cases/${encodeURIComponent(c.caseNumber)}`),
             { headers: authHeaders() }
           )
           assigned = fixed?.assignedMortician ?? null
           assignedUserId = (fixed?.assignedMorticianUserId ?? assignedUserId) as any
         } catch {
-          // If /api/cases/{caseNumber} fails for some reason, fall back to whatever d provided
           assigned = d.assignedMortician ?? null
         }
 
@@ -437,21 +441,21 @@ async function toggleRow(caseNumber: string) {
   openDetails.value = null
 
   try {
-    // Keep the richer /api/public/cases/{caseNumber} payload for the details view
-    openDetails.value = await $fetch<CaseDetailsDto>(`/api/public/cases/${encodeURIComponent(caseNumber)}`, {
+    openDetails.value = await $fetch<CaseDetailsDto>(apiUrl(`/api/public/cases/${encodeURIComponent(caseNumber)}`), {
       headers: authHeaders(),
     })
 
     // ✅ Patch in assigned mortician from fixed /api/cases/{caseNumber}
     try {
-      const fixed = await $fetch<{ assignedMortician: MorticianLite | null }>(`/api/cases/${encodeURIComponent(caseNumber)}`, {
-        headers: authHeaders(),
-      })
+      const fixed = await $fetch<{ assignedMortician: MorticianLite | null }>(
+        apiUrl(`/api/cases/${encodeURIComponent(caseNumber)}`),
+        { headers: authHeaders() }
+      )
       if (openDetails.value) {
         openDetails.value.assignedMortician = fixed?.assignedMortician ?? openDetails.value.assignedMortician ?? null
       }
     } catch {
-      // ignore (we'll show whatever the public details endpoint returned)
+      // ignore
     }
   } catch (e: any) {
     detailsError.value = e?.data?.message || e?.message || "Failed to load case details."
@@ -461,7 +465,6 @@ async function toggleRow(caseNumber: string) {
 }
 
 async function refreshAll() {
-  // Restore token from localStorage + populate roles via /me
   loadFromStorage()
   if (token.value) {
     await fetchMe()

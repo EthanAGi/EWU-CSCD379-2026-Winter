@@ -41,8 +41,9 @@ import { useAuth } from "../composables/useAuth"
 const router = useRouter()
 const { user, roles, logout, initAuth } = useAuth()
 
-onMounted(() => {
-  initAuth()
+onMounted(async () => {
+  // ✅ await so roles/user are populated before nav gating runs
+  await initAuth()
 })
 
 const isLoggedIn = computed(() => !!user.value)

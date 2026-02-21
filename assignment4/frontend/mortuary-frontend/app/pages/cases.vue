@@ -499,15 +499,20 @@ function authHeaders(): Record<string, string> {
   return token.value ? { Authorization: `Bearer ${token.value}` } : {}
 }
 
+/**
+ * ✅ Azure Static Web Apps fix:
+ * - DEV: apiBase is "" => calls "/api/..." (Vite proxy handles it)
+ * - PROD: apiBase is "https://<appservice>" => calls "https://.../api/..."
+ */
 const config = useRuntimeConfig()
-const API_BASE = computed(() => (config.public as any)?.apiBase ?? "")
+const API_BASE = computed(() => {
+  const raw = ((config.public as any)?.apiBase ?? "") as string
+  return String(raw).replace(/\/+$/, "")
+})
 
-function joinUrl(base: string, path: string): string {
-  const b = (base ?? "").trim()
-  if (!b) return path
-  const b2 = b.endsWith("/") ? b.slice(0, -1) : b
-  const p2 = path.startsWith("/") ? path : `/${path}`
-  return `${b2}${p2}`
+function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`
+  return API_BASE.value ? `${API_BASE.value}${p}` : p
 }
 
 /** Types */
@@ -689,8 +694,8 @@ function updateListAssignedMortician(caseNumber: string, m: MorticianDto | null)
   row.assignedMortician = m
 }
 
-/** API helper */
-async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+/** API helper (UPDATED to use apiUrl) */
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> | undefined),
   }
@@ -702,8 +707,7 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
   const auth = authHeaders()
   if (auth.Authorization) headers["Authorization"] = auth.Authorization
 
-  const fullUrl = joinUrl(API_BASE.value, url)
-  const res = await fetch(fullUrl, { ...options, headers, cache: "no-store" })
+  const res = await fetch(apiUrl(path), { ...options, headers, cache: "no-store" })
 
   if (!res.ok) {
     const txt = await res.text()
@@ -1126,8 +1130,7 @@ async function refreshAll(): Promise<void> {
 
   if (!canUsePage.value) return
 
-  // ✅ CHANGE REQUESTED:
-  // Admins should default to ALL cases when entering the page.
+  // Admins default to ALL cases when entering the page.
   if (isAdmin.value) listMode.value = "all"
   else listMode.value = "mine"
 

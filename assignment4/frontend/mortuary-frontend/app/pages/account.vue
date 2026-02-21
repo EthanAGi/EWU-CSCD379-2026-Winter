@@ -109,26 +109,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { $fetch } from "ofetch"
-import { useAuth } from "../../composables/useAuth" // ✅ your project prefers this path
+import { useRuntimeConfig } from "#imports"
+import { useAuth } from "../../composables/useAuth"
 
 type ApiUser = {
   id: string
   email: string
   displayName?: string | null
   roles: string[]
-
-  // ✅ from updated GET /api/admin/users
   isDisabled: boolean
   lockoutEndUtc?: string | null
 }
 
 type UiUser = ApiUser & {
   editRoles: string[]
-
   saving: boolean
   saved: boolean
   saveError: string | null
-
   toggling: boolean
   deleting: boolean
   actionOk: string | null
@@ -150,7 +147,6 @@ const { user, roles, token, initAuth } = useAuth()
 const isLoggedIn = computed(() => !!user.value)
 const isAdmin = computed(() => roles.value?.includes("Admin"))
 const isMortician = computed(() => roles.value?.includes("Mortician"))
-
 const canViewAnything = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
 
 const loading = ref(false)
@@ -187,14 +183,29 @@ function formatUtc(isoOrNull: string | null | undefined) {
   return d.toLocaleString()
 }
 
+/**
+ * ✅ NEW: build URLs that work in BOTH environments
+ * - DEV: apiBase="" -> "/api/..."
+ * - PROD: apiBase="https://<appservice>" -> "https://.../api/..."
+ */
+const config = useRuntimeConfig()
+const API_BASE = computed(() => (config.public as any)?.apiBase ?? "")
+
+function apiUrl(path: string) {
+  const p = path.startsWith("/") ? path : `/${path}`
+  const base = (API_BASE.value ?? "").trim()
+  if (!base) return p
+  const b2 = base.endsWith("/") ? base.slice(0, -1) : base
+  return `${b2}${p}`
+}
+
 async function loadUsers() {
   if (!isAdmin.value) return
   loading.value = true
   error.value = null
 
   try {
-    // ✅ matches Swagger: GET /api/admin/users
-    const list = await $fetch<ApiUser[]>("/api/admin/users", {
+    const list = await $fetch<ApiUser[]>(apiUrl("/api/admin/users"), {
       headers: authHeaders(),
     })
 
@@ -224,8 +235,7 @@ async function loadUsers() {
 async function setRole(userId: string, role: "Admin" | "Mortician", enabled: boolean) {
   const payload: SetRoleRequest = { userId, role, enabled }
 
-  // ✅ matches Swagger: POST /api/admin/users/set-role
-  return await $fetch("/api/admin/users/set-role", {
+  return await $fetch(apiUrl("/api/admin/users/set-role"), {
     method: "POST",
     headers: authHeaders(),
     body: payload,
@@ -279,14 +289,12 @@ async function toggleEnabled(u: UiUser) {
       enabled: u.isDisabled, // if disabled -> enable; if enabled -> disable
     }
 
-    // ✅ matches Swagger: POST /api/admin/users/set-enabled
-    const res = await $fetch<any>("/api/admin/users/set-enabled", {
+    const res = await $fetch<any>(apiUrl("/api/admin/users/set-enabled"), {
       method: "POST",
       headers: authHeaders(),
       body: payload,
     })
 
-    // Update status from response (supports either casing)
     u.isDisabled = !!(res?.isDisabled ?? res?.IsDisabled)
     u.lockoutEndUtc = (res?.lockoutEndUtc ?? res?.LockoutEndUtc ?? null) as any
 
@@ -300,7 +308,6 @@ async function toggleEnabled(u: UiUser) {
 }
 
 async function deleteUser(u: UiUser) {
-  // browser confirm is simplest and clear
   const ok = window.confirm(`Delete user ${u.email}? This cannot be undone.`)
   if (!ok) return
 
@@ -309,13 +316,11 @@ async function deleteUser(u: UiUser) {
   u.actionOk = null
 
   try {
-    // ✅ matches Swagger: DELETE /api/admin/users/{userId}
-    await $fetch(`/api/admin/users/${encodeURIComponent(u.id)}`, {
+    await $fetch(apiUrl(`/api/admin/users/${encodeURIComponent(u.id)}`), {
       method: "DELETE",
       headers: authHeaders(),
     })
 
-    // Remove from local list
     users.value = users.value.filter((x) => x.id !== u.id)
   } catch (e: any) {
     u.saveError = e?.data?.message || e?.message || "Failed to delete user."

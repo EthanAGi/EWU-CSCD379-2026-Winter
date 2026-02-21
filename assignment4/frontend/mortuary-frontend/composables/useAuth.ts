@@ -1,6 +1,6 @@
 // composables/useAuth.ts
 import { computed } from "vue"
-import { useState } from "nuxt/app"
+import { useState, useRuntimeConfig } from "#imports"
 import { $fetch } from "ofetch"
 
 type AuthResponse = {
@@ -24,6 +24,25 @@ function isClient() {
 }
 
 export function useAuth() {
+  // ✅ Nuxt runtime config (typed more reliably via #imports)
+  const config = useRuntimeConfig()
+
+  // ✅ Force apiBase to be treated as a string (fixes TS: '{}' has no endsWith/slice)
+  const apiBase = computed(() => {
+    const raw = (config.public.apiBase as unknown as string) || ""
+    return raw.replace(/\/+$/, "") // trim trailing slashes
+  })
+
+  /**
+   * Build an API URL that works in BOTH environments:
+   * - DEV: apiBase == ""  -> "/api/..."
+   * - PROD: apiBase == "https://<api-app-service>" -> "https://<api-app-service>/api/..."
+   */
+  function apiUrl(path: string) {
+    const p = path.startsWith("/") ? path : `/${path}`
+    return apiBase.value ? `${apiBase.value}${p}` : p
+  }
+
   // global reactive auth state (shared across app)
   const token = useState<string | null>("auth_token", () => null)
   const roles = useState<string[]>("auth_roles", () => [])
@@ -54,7 +73,7 @@ export function useAuth() {
   }
 
   async function login(email: string, password: string) {
-    const res = await $fetch<AuthResponse>("/api/auth/login", {
+    const res = await $fetch<AuthResponse>(apiUrl("/api/auth/login"), {
       method: "POST",
       body: { email, password },
     })
@@ -65,7 +84,7 @@ export function useAuth() {
   }
 
   async function register(email: string, password: string, displayName?: string) {
-    const res = await $fetch<AuthResponse>("/api/auth/register", {
+    const res = await $fetch<AuthResponse>(apiUrl("/api/auth/register"), {
       method: "POST",
       body: { email, password, displayName },
     })
@@ -83,7 +102,7 @@ export function useAuth() {
     }
 
     try {
-      const me = await $fetch<MeResponse>("/api/auth/me", {
+      const me = await $fetch<MeResponse>(apiUrl("/api/auth/me"), {
         headers: { Authorization: `Bearer ${token.value}` },
       })
 
@@ -91,7 +110,6 @@ export function useAuth() {
       roles.value = me.roles ?? roles.value ?? []
       return me
     } catch {
-      // token might be expired/invalid
       logout()
       return null
     }
@@ -103,12 +121,6 @@ export function useAuth() {
     user.value = null
   }
 
-  /**
-   * Optional helper:
-   * Call this once at app start to restore auth state.
-   * - loads token from localStorage
-   * - if token exists, fetches /me to populate user
-   */
   async function initAuth() {
     loadFromStorage()
     if (token.value) await fetchMe()
