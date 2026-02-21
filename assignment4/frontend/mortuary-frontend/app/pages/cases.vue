@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <header class="topbar">
-      <div>
+      <div class="topbarLeft">
         <h1>Cases</h1>
         <p class="muted">Create case files, review assigned cases, and progress workflow tasks.</p>
         <p class="muted small">
@@ -49,6 +49,7 @@
         <div v-else class="muted">
           Enter case details below to create a new case file.
           <span v-if="isMortician" class="muted"> If you are a Mortician, you should be auto-assigned (server-side). </span>
+          <span v-if="isAdmin" class="muted"> Admins can optionally assign a mortician during creation. </span>
         </div>
       </section>
 
@@ -65,6 +66,17 @@
           <label class="field">
             <span>Next of Kin Name</span>
             <input v-model.trim="createForm.nextOfKinName" placeholder="Jane Doe" />
+          </label>
+
+          <!-- ✅ Admin can assign mortician at create time -->
+          <label v-if="isAdmin" class="field">
+            <span>Assign Mortician (optional)</span>
+            <select v-model="createForm.assignedMorticianUserId" :disabled="morticianOptions.length === 0">
+              <option value="">Unassigned</option>
+              <option v-for="m in morticianOptions" :key="m.id" :value="m.id">
+                {{ morticianLabel(m) }}
+              </option>
+            </select>
           </label>
 
           <div class="dividerRow">
@@ -128,8 +140,10 @@
             <h2>Case list</h2>
 
             <div class="chips">
+              <!-- Morticians: only My Cases -->
               <button class="chip" :class="{ active: listMode === 'mine' }" @click="listMode = 'mine'">My Cases</button>
 
+              <!-- Admin extra views -->
               <button
                 v-if="isAdmin"
                 class="chip"
@@ -197,7 +211,7 @@
 
           <div v-else>
             <div class="detailHeader">
-              <div>
+              <div class="detailLeft">
                 <h3 class="caseTitle">{{ selectedCase.caseNumber }}</h3>
 
                 <div class="detailMeta">
@@ -242,7 +256,7 @@
                   <div class="muted small" v-if="morticianOptions.length === 0">No mortician users found.</div>
                 </div>
 
-                <!-- Admin complete button stays available (requires all done) -->
+                <!-- Admin complete -->
                 <button
                   class="btn primary"
                   v-if="isAdmin && selectedCase.status !== 'Completed'"
@@ -274,12 +288,6 @@
             </div>
 
             <hr class="sep" />
-
-            <!-- =========================
-                 WORKFLOW
-                 Mortician: wizard (single step)
-                 Admin: full list (unchanged)
-                 ========================= -->
 
             <!-- Mortician wizard -->
             <div v-if="isMorticianWizard" class="wizard">
@@ -317,9 +325,7 @@
 
                   <div class="wizardNav">
                     <button class="btn" @click="prevStep" :disabled="wizardStepIndex <= 0 || updatingTaskId === activeTask.id">Prev</button>
-                    <button class="btn" @click="nextStep" :disabled="wizardStepIndex >= sortedTasks.length - 1 || updatingTaskId === activeTask.id">
-                      Next
-                    </button>
+                    <button class="btn" @click="nextStep" :disabled="wizardStepIndex >= sortedTasks.length - 1 || updatingTaskId === activeTask.id">Next</button>
                   </div>
                 </div>
 
@@ -374,7 +380,7 @@
               <div v-else class="muted">No workflow tasks exist for this case.</div>
             </div>
 
-            <!-- Admin (or non-wizard): full list -->
+            <!-- Admin / non-wizard: full list -->
             <div v-else>
               <div class="tasksHeader">
                 <h3>Workflow steps</h3>
@@ -446,7 +452,12 @@
             </div>
 
             <form class="noteCreate" @submit.prevent="addNote">
-              <textarea v-model.trim="newNoteText" rows="3" placeholder="Write a case note..." :disabled="addingNote || selectedCase.status === 'Completed'" />
+              <textarea
+                v-model.trim="newNoteText"
+                rows="3"
+                placeholder="Write a case note..."
+                :disabled="addingNote || selectedCase.status === 'Completed'"
+              />
               <button class="btn primary" type="submit" :disabled="addingNote || !newNoteText || selectedCase.status === 'Completed'">
                 {{ addingNote ? "Adding..." : "Add Note" }}
               </button>
@@ -559,6 +570,8 @@ type CaseNoteDto = {
 
 /** UI State */
 const viewMode = ref<"open" | "create">("open")
+
+// ✅ Admin can choose all/unassigned; mortician is always mine
 const listMode = ref<"mine" | "unassigned" | "all">("mine")
 
 const q = ref<string>("")
@@ -594,6 +607,8 @@ const selectedMorticianId = ref<string>("")
 const createForm = reactive({
   caseNumber: "",
   nextOfKinName: "",
+  assignedMorticianUserId: "",
+
   decedentFirstName: "",
   decedentLastName: "",
   dateOfBirth: "",
@@ -646,6 +661,8 @@ function decedentFullName(d: DecedentDto): string {
 function resetCreateForm(): void {
   createForm.caseNumber = ""
   createForm.nextOfKinName = ""
+  createForm.assignedMorticianUserId = ""
+
   createForm.decedentFirstName = ""
   createForm.decedentLastName = ""
   createForm.dateOfBirth = ""
@@ -705,9 +722,17 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
 /** Filtering */
 const filteredCases = computed<CaseListItemDto[]>(() => {
   const needle = q.value.toLowerCase()
-  return (cases.value ?? [])
+  const base = (cases.value ?? [])
     .filter((c) => c.caseNumber.toLowerCase().includes(needle))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
+
+  if (isAdmin.value) {
+    if (listMode.value === "unassigned") return base.filter((c) => !c.assignedMortician)
+    if (listMode.value === "all") return base
+    return base
+  }
+
+  return base
 })
 
 /** Sorted tasks for wizard */
@@ -732,7 +757,6 @@ const isMorticianWizard = computed(() => isMortician.value && !isAdmin.value)
 /** Wizard state */
 const wizardStepIndex = ref(0)
 
-/** ✅ FIX: activeTask can be null when there are no tasks */
 const activeTask = computed<CaseTaskDto | null>(() => {
   const arr = sortedTasks.value
   if (!arr.length) return null
@@ -764,24 +788,13 @@ async function loadCases(): Promise<void> {
   listError.value = ""
   try {
     if (isMortician.value && !isAdmin.value) {
-      const mine = await apiFetch<CaseListItemDto[]>(`/api/cases?scope=mine`)
-      cases.value = mine ?? []
+      cases.value = (await apiFetch<CaseListItemDto[]>(`/api/cases?scope=mine`)) ?? []
       return
     }
 
     if (isAdmin.value) {
-      if (listMode.value === "mine") {
-        const mine = await apiFetch<CaseListItemDto[]>(`/api/cases?scope=mine`)
-        cases.value = mine ?? []
-        return
-      }
-
-      const all = await apiFetch<CaseListItemDto[]>(`/api/cases?scope=all`)
-      if (listMode.value === "unassigned") {
-        cases.value = (all ?? []).filter((c) => !c.assignedMortician)
-      } else {
-        cases.value = all ?? []
-      }
+      // pull all from server (admin-mine returns all), filter client-side by listMode
+      cases.value = (await apiFetch<CaseListItemDto[]>(`/api/cases?scope=mine`)) ?? []
       return
     }
 
@@ -824,7 +837,6 @@ async function loadCaseAndChildren(caseNumber: string): Promise<void> {
       updateListAssignedMortician(selectedCase.value.caseNumber, selectedCase.value.assignedMortician)
     }
 
-    // Wizard starts at the first NOT done step
     if (isMorticianWizard.value) {
       const arr = [...(tasks.value ?? [])].sort((a, b) => {
         const ao = a.workflowStepTemplate?.sortOrder ?? 9999
@@ -855,7 +867,7 @@ async function createCase(): Promise<void> {
   createError.value = ""
   createOk.value = ""
   try {
-    const payload = {
+    const payload: any = {
       caseNumber: createForm.caseNumber.trim(),
       nextOfKinName: createForm.nextOfKinName.trim() || null,
       decedent: {
@@ -867,6 +879,10 @@ async function createCase(): Promise<void> {
         tagNumber: createForm.tagNumber.trim() || null,
         storageLocation: createForm.storageLocation.trim() || null,
       },
+    }
+
+    if (isAdmin.value && createForm.assignedMorticianUserId.trim()) {
+      payload.assignedMorticianUserId = createForm.assignedMorticianUserId.trim()
     }
 
     const created = await apiFetch<{ caseNumber: string }>(`/api/cases`, {
@@ -1110,11 +1126,10 @@ async function refreshAll(): Promise<void> {
 
   if (!canUsePage.value) return
 
-  if (isAdmin.value) {
-    if (listMode.value === "mine") listMode.value = "unassigned"
-  } else {
-    listMode.value = "mine"
-  }
+  // ✅ CHANGE REQUESTED:
+  // Admins should default to ALL cases when entering the page.
+  if (isAdmin.value) listMode.value = "all"
+  else listMode.value = "mine"
 
   await loadMorticiansIfAdmin()
   await loadCases()
@@ -1133,74 +1148,187 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* (unchanged) */
+/* Layout */
 .page { max-width: 1200px; margin: 0 auto; padding: 16px; }
-.topbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
-.actions { display: flex; gap: 8px; }
-.small { font-size: 12px; }
-.grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
-@media (min-width: 980px) { .grid { grid-template-columns: 420px 1fr; } }
-.card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 16px; backdrop-filter: blur(10px); }
-.modeHeader{ display:flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
-.modePills{ display:flex; gap:8px; flex-wrap: wrap; }
-.subCard { margin-top: 12px; padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); }
-.subTitle { font-weight: 700; margin-bottom: 6px; }
-h1 { margin: 0; font-size: 28px; }
+
+/* ✅ Fix overlap/misalignment: allow wrap + consistent alignment */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.topbarLeft { min-width: 260px; }
+.actions { display: flex; gap: 10px; align-items: center; }
+
+/* Headings */
+h1 { margin: 0; font-size: 28px; line-height: 1.2; }
 h2 { margin: 0 0 10px 0; font-size: 18px; }
 h3 { margin: 0; }
+.small { font-size: 12px; }
 .muted { opacity: 0.75; }
-.error { margin-top: 10px; color: #ffb3b3; }
-.ok { margin-top: 10px; color: #b8ffb8; }
-.okText { color: #b8ffb8; }
-.warnText { color: #ffd28a; }
-.btn { border: 1px solid rgba(255,255,255,0.20); background: rgba(255,255,255,0.08); color: inherit; padding: 10px 12px; border-radius: 12px; cursor: pointer; }
+
+/* Cards */
+.card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 16px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+}
+
+/* Buttons / inputs */
+.btn {
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(255,255,255,0.08);
+  color: inherit;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+}
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn.primary { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.30); }
-.field { display: grid; gap: 6px; }
-.formGrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-@media (min-width: 760px) { .formGrid { grid-template-columns: 1fr 1fr; } }
-.dividerRow { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; margin-top: 6px; }
-.formActions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.20); background: rgba(0,0,0,0.25); color: inherit; outline: none; }
-.listHeader { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
-.chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.chip { padding: 8px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); cursor: pointer; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(0,0,0,0.25);
+  color: inherit;
+  outline: none;
+  box-sizing: border-box; /* ✅ prevents “overflow/overlap” */
+}
+
+/* Mode header */
+.modeHeader{
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap; /* ✅ prevents pill overlap */
+}
+.modePills{ display:flex; gap:8px; flex-wrap: wrap; }
+
+/* Chips */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+  white-space: nowrap;
+}
 .chip.active { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.28); }
+
+/* Main grid */
+.grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
+@media (min-width: 980px) { .grid { grid-template-columns: 420px 1fr; } }
+
+/* List header + search */
+.listHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap; /* ✅ prevents overlap when narrow */
+}
 .searchRow { margin-bottom: 10px; }
+
+/* Case list */
 .caseList { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .caseRow { padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); cursor: pointer; }
 .caseRow.selected { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.06); }
 .rowTop { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .rowBottom { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
-.badge { padding: 4px 8px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); }
+
+/* Badges */
+.badge { padding: 4px 8px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); white-space: nowrap; }
 .b-intake { background: rgba(255,255,255,0.06); }
 .b-prep { background: rgba(255,255,255,0.10); }
 .b-viewing { background: rgba(120,200,255,0.12); }
 .b-scheduled { background: rgba(255,210,120,0.12); }
 .b-completed { background: rgba(0,255,0,0.10); border-color: rgba(0,255,0,0.25); }
-.detailHeader { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+
+/* Details header */
+.detailHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap; /* ✅ prevents right-side controls from crushing */
+}
+.detailLeft { min-width: 240px; }
 .caseTitle { font-size: 22px; }
 .detailMeta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
-.detailActions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: flex-end; }
-.assignBox { display: grid; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.12); min-width: 280px; }
+
+/* ✅ Right-side action alignment */
+.detailActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+/* Assign box */
+.assignBox {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.12);
+  min-width: 280px;
+}
 .assignActions{ display:flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .miniField { display: grid; gap: 6px; }
+
+/* Create form */
+.field { display: grid; gap: 6px; }
+.formGrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 760px) { .formGrid { grid-template-columns: 1fr 1fr; } }
+.dividerRow { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; margin-top: 6px; flex-wrap: wrap; }
+.formActions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Subcard + separators */
+.subCard { margin-top: 12px; padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); }
+.subTitle { font-weight: 700; margin-bottom: 6px; }
+.kv { display: grid; gap: 6px; margin-top: 8px; }
 .sep { border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 16px 0; }
-.tasksHeader { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+
+/* Feedback */
+.error { margin-top: 10px; color: #ffb3b3; }
+.ok { margin-top: 10px; color: #b8ffb8; }
+.okText { color: #b8ffb8; }
+.warnText { color: #ffd28a; }
+
+/* Tasks */
+.tasksHeader { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .taskList { list-style: none; padding: 0; margin: 10px 0 0 0; display: grid; gap: 10px; }
 .taskRow { padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); display: grid; grid-template-columns: 1fr; gap: 12px; }
 @media (min-width: 980px) { .taskRow { grid-template-columns: 1fr 380px; } }
 .taskName { display: grid; gap: 6px; }
 .taskRight { display: grid; gap: 10px; }
-.kv { display: grid; gap: 6px; margin-top: 8px; }
+
+/* Notes */
 .noteCreate { margin-top: 10px; display: grid; gap: 10px; }
 .noteList { list-style: none; padding: 0; margin: 10px 0 0 0; display: grid; gap: 10px; }
 .noteRow { padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); }
 .noteText { white-space: pre-wrap; }
+
+/* Wizard */
 .wizardCard { margin-top: 10px; padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14); display: grid; gap: 12px; }
 .wizardTop { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
 .wizardTitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wizardNav { display: flex; gap: 10px; flex-wrap: wrap; }
+.wizardNav { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .wizardForm { display: grid; gap: 10px; }
 .wizardActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 </style>

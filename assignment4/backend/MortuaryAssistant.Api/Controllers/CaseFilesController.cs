@@ -31,8 +31,8 @@ public class CaseFilesController : ControllerBase
         var user = await _users.GetUserAsync(User);
         if (user == null) return Unauthorized();
 
+        // Base query for case files + decedent
         IQueryable<CaseFile> q = _db.CaseFiles
-            .Include(x => x.AssignedMortician)
             .Include(x => x.Decedent);
 
         if (string.Equals(scope, "all", StringComparison.OrdinalIgnoreCase))
@@ -56,9 +56,15 @@ public class CaseFilesController : ControllerBase
             }
         }
 
-        var results = await q
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(c => new
+        // ✅ IMPORTANT:
+        // Resolve assigned mortician via left join on Users, ignoring any global filters on ApplicationUser
+        var results = await (
+            from c in q
+            join m in _users.Users.IgnoreQueryFilters()
+                on c.AssignedMorticianUserId equals m.Id into mortJoin
+            from m in mortJoin.DefaultIfEmpty()
+            orderby c.CreatedAt descending
+            select new
             {
                 caseNumber = c.CaseNumber,
                 status = c.Status.ToString(),
@@ -67,20 +73,22 @@ public class CaseFilesController : ControllerBase
                 decedentName = c.Decedent == null
                     ? null
                     : (c.Decedent.FirstName + " " + c.Decedent.LastName).Trim(),
-                assignedMortician = c.AssignedMortician == null ? null : new
+                assignedMortician = m == null ? null : new
                 {
-                    c.AssignedMortician.Id,
-                    c.AssignedMortician.Email,
-                    c.AssignedMortician.DisplayName
+                    m.Id,
+                    m.Email,
+                    m.DisplayName
                 }
-            })
-            .ToListAsync();
+            }
+        ).ToListAsync();
 
         return Ok(results);
     }
 
     // ✅ Create case (Mortician or Admin)
-    // ✅ Auto-assign: if creator is Mortician, assign them as AssignedMorticianUserId
+    // ✅ Auto-assign:
+    //    - If creator is Mortician -> assign creator
+    //    - Else if creator is Admin and AssignedMorticianUserId provided -> assign that mortician (validated)
     // ✅ Optionally creates Decedent
     // ✅ Auto-creates tasks from active WorkflowStepTemplate rows
     [HttpPost]
@@ -107,15 +115,35 @@ public class CaseFilesController : ControllerBase
             CreatedAt = DateTime.UtcNow
         };
 
-        // ✅ AUTO-ASSIGN CREATOR (only if they are a Mortician)
-        // Admins can create cases too; if they're not a Mortician, leave unassigned.
-        // Using User.IsInRole is fine because the JWT already contains roles, but we double-check via UserManager safely.
+        // ✅ Determine creator role
         var creatorIsMortician =
             User.IsInRole(Roles.Mortician) || await _users.IsInRoleAsync(creator, Roles.Mortician);
 
+        var creatorIsAdmin =
+            User.IsInRole(Roles.Admin) || await _users.IsInRoleAsync(creator, Roles.Admin);
+
+        // ✅ Assignment rules
         if (creatorIsMortician)
         {
+            // Morticians always auto-assign to themselves
             entity.AssignedMorticianUserId = creator.Id;
+        }
+        else if (creatorIsAdmin)
+        {
+            // Admins may optionally assign a mortician during creation
+            var requestedId = request.AssignedMorticianUserId?.Trim();
+            if (!string.IsNullOrWhiteSpace(requestedId))
+            {
+                var mort = await _users.FindByIdAsync(requestedId);
+                if (mort == null)
+                    return BadRequest(new { message = "AssignedMorticianUserId is invalid (user not found)." });
+
+                if (!await _users.IsInRoleAsync(mort, Roles.Mortician))
+                    return BadRequest(new { message = "AssignedMorticianUserId must belong to a Mortician user." });
+
+                entity.AssignedMorticianUserId = mort.Id;
+            }
+            // else: leave unassigned
         }
 
         // Optional Decedent creation (only if name provided)
@@ -168,7 +196,6 @@ public class CaseFilesController : ControllerBase
     public async Task<IActionResult> GetCase(string caseNumber)
     {
         var c = await _db.CaseFiles
-            .Include(x => x.AssignedMortician)
             .Include(x => x.Decedent)
             .FirstOrDefaultAsync(x => x.CaseNumber == caseNumber);
 
@@ -177,6 +204,12 @@ public class CaseFilesController : ControllerBase
 
         await EnforceCaseAccess(c);
 
+        // ✅ Resolve mortician ignoring global filters
+        var m = await _users.Users.IgnoreQueryFilters()
+            .Where(u => u.Id == c.AssignedMorticianUserId)
+            .Select(u => new { u.Id, u.Email, u.DisplayName })
+            .FirstOrDefaultAsync();
+
         return Ok(new
         {
             c.Id,
@@ -184,12 +217,7 @@ public class CaseFilesController : ControllerBase
             status = c.Status.ToString(),
             c.CreatedAt,
             nextOfKinName = c.NextOfKinName,
-            assignedMortician = c.AssignedMortician == null ? null : new
-            {
-                c.AssignedMortician.Id,
-                c.AssignedMortician.Email,
-                c.AssignedMortician.DisplayName
-            },
+            assignedMortician = m,
             decedent = c.Decedent == null ? null : new
             {
                 c.Decedent.Id,
@@ -204,14 +232,12 @@ public class CaseFilesController : ControllerBase
         });
     }
 
-    // ✅ NEW: Assignment info endpoint
-    // Reveals if a mortician is assigned + who (if assigned)
+    // ✅ Assignment info endpoint
     [HttpGet("{caseNumber}/assignment")]
     [Authorize(Roles = Roles.Mortician + "," + Roles.Admin)]
     public async Task<IActionResult> GetAssignment(string caseNumber)
     {
         var c = await _db.CaseFiles
-            .Include(x => x.AssignedMortician)
             .FirstOrDefaultAsync(x => x.CaseNumber == caseNumber);
 
         if (c == null)
@@ -219,16 +245,17 @@ public class CaseFilesController : ControllerBase
 
         await EnforceCaseAccess(c);
 
+        // ✅ Resolve mortician ignoring global filters
+        var m = await _users.Users.IgnoreQueryFilters()
+            .Where(u => u.Id == c.AssignedMorticianUserId)
+            .Select(u => new { u.Id, u.Email, u.DisplayName })
+            .FirstOrDefaultAsync();
+
         return Ok(new
         {
             caseNumber = c.CaseNumber,
             isAssigned = c.AssignedMorticianUserId != null,
-            assignedMortician = c.AssignedMortician == null ? null : new
-            {
-                c.AssignedMortician.Id,
-                c.AssignedMortician.Email,
-                c.AssignedMortician.DisplayName
-            }
+            assignedMortician = m
         });
     }
 
@@ -444,7 +471,8 @@ public record AssignMorticianRequest(string UserId);
 public record CreateCaseRequest(
     string CaseNumber,
     string? NextOfKinName,
-    CreateDecedentRequest? Decedent
+    CreateDecedentRequest? Decedent,
+    string? AssignedMorticianUserId
 );
 
 public record CreateDecedentRequest(

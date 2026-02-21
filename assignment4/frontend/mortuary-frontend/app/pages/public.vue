@@ -93,7 +93,11 @@
         <div class="kv">
           <span class="k">Assigned Mortician</span>
           <span class="v">
-            {{ openDetails.assignedMortician?.displayName ?? openDetails.assignedMortician?.email ?? "—" }}
+            {{
+              openDetails.assignedMortician?.displayName ??
+              openDetails.assignedMortician?.email ??
+              "—"
+            }}
           </span>
         </div>
 
@@ -271,7 +275,7 @@ type CaseDetailsDto = {
  * ----------------------------- */
 const { token, roles, isLoggedIn, loadFromStorage, fetchMe } = useAuth()
 
-// expose roles for template (avoid confusion with local variables)
+// expose roles for template
 const authRoles = computed(() => roles.value ?? [])
 
 // Use roles to gate verbose content
@@ -292,8 +296,17 @@ const cases = ref<PublicCase[]>([])
 const pending = ref(true)
 const errorMessage = ref<string | null>(null)
 
+// ✅ store *both* a string label and the full object if present
 const verboseByCase = ref<
-  Record<string, { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null }>
+  Record<
+    string,
+    {
+      decedentName: string
+      assignedMorticianName: string | null
+      assignedMorticianUserId: string | null
+      assignedMortician: MorticianLite | null
+    }
+  >
 >({})
 
 const openCaseNumber = ref<string | null>(null)
@@ -317,6 +330,11 @@ function closeDetails() {
   detailsPending.value = false
 }
 
+function morticianLabel(m: MorticianLite | null | undefined): string {
+  if (!m) return "—"
+  return (m.displayName || m.email || m.id || "—").trim() || "—"
+}
+
 /** -----------------------------
  * Data loading
  * ----------------------------- */
@@ -335,8 +353,15 @@ async function loadPublicList() {
 }
 
 /**
- * Load decedent + assigned mortician for the table (verbose users only)
- * Uses the protected endpoint; will fail if you aren’t Admin/Mortician (which is fine).
+ * ✅ FIX:
+ * The /api/public/cases/{caseNumber} endpoint likely still uses the old EF navigation (AssignedMortician)
+ * and returns assignedMorticianUserId but assignedMortician object is null.
+ *
+ * So we:
+ * 1) Try fetching details (for decedent name).
+ * 2) Separately call /api/cases/{caseNumber} (the fixed controller) to get assignedMortician reliably.
+ *
+ * Both calls are protected, so they only run for Admin/Mortician.
  */
 async function loadVerboseExtras() {
   if (!canSeeVerbose.value) {
@@ -347,12 +372,13 @@ async function loadVerboseExtras() {
 
   const map: Record<
     string,
-    { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null }
+    { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null; assignedMortician: MorticianLite | null }
   > = {}
 
   await Promise.all(
     (cases.value ?? []).map(async (c) => {
       try {
+        // 1) public-details endpoint (for decedent/tasks/etc)
         const d = await $fetch<CaseDetailsDto>(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`, {
           headers: authHeaders(),
         })
@@ -361,16 +387,32 @@ async function loadVerboseExtras() {
         const last = d.decedent?.lastName?.trim() ?? ""
         const decedentName = (first + " " + last).trim() || "—"
 
-        const assignedName = d.assignedMortician?.displayName ?? d.assignedMortician?.email ?? null
+        // 2) reliable assigned mortician from /api/cases/{caseNumber} (your fixed controller)
+        let assigned: MorticianLite | null = null
+        let assignedUserId: string | null = (d.assignedMorticianUserId ?? null) as any
+
+        try {
+          const fixed = await $fetch<{ assignedMortician: MorticianLite | null; assignedMorticianUserId?: string | null }>(
+            `/api/cases/${encodeURIComponent(c.caseNumber)}`,
+            { headers: authHeaders() }
+          )
+          assigned = fixed?.assignedMortician ?? null
+          assignedUserId = (fixed?.assignedMorticianUserId ?? assignedUserId) as any
+        } catch {
+          // If /api/cases/{caseNumber} fails for some reason, fall back to whatever d provided
+          assigned = d.assignedMortician ?? null
+        }
 
         map[c.caseNumber] = {
           decedentName,
-          assignedMorticianName: assignedName,
-          assignedMorticianUserId: d.assignedMorticianUserId ?? null,
+          assignedMortician: assigned,
+          assignedMorticianName: morticianLabel(assigned),
+          assignedMorticianUserId: assignedUserId,
         }
       } catch {
         map[c.caseNumber] = {
           decedentName: "—",
+          assignedMortician: null,
           assignedMorticianName: null,
           assignedMorticianUserId: null,
         }
@@ -395,9 +437,22 @@ async function toggleRow(caseNumber: string) {
   openDetails.value = null
 
   try {
+    // Keep the richer /api/public/cases/{caseNumber} payload for the details view
     openDetails.value = await $fetch<CaseDetailsDto>(`/api/public/cases/${encodeURIComponent(caseNumber)}`, {
       headers: authHeaders(),
     })
+
+    // ✅ Patch in assigned mortician from fixed /api/cases/{caseNumber}
+    try {
+      const fixed = await $fetch<{ assignedMortician: MorticianLite | null }>(`/api/cases/${encodeURIComponent(caseNumber)}`, {
+        headers: authHeaders(),
+      })
+      if (openDetails.value) {
+        openDetails.value.assignedMortician = fixed?.assignedMortician ?? openDetails.value.assignedMortician ?? null
+      }
+    } catch {
+      // ignore (we'll show whatever the public details endpoint returned)
+    }
   } catch (e: any) {
     detailsError.value = e?.data?.message || e?.message || "Failed to load case details."
   } finally {
@@ -406,7 +461,7 @@ async function toggleRow(caseNumber: string) {
 }
 
 async function refreshAll() {
-  // Restore token from localStorage (ma_token) + populate roles via /me
+  // Restore token from localStorage + populate roles via /me
   loadFromStorage()
   if (token.value) {
     await fetchMe()
