@@ -13,6 +13,24 @@ var builder = WebApplication.CreateBuilder(args);
 // Controllers
 builder.Services.AddControllers();
 
+/* -------------------------------------------------------
+ * ✅ CORS (so Nuxt Static Web App can call this API)
+ * ------------------------------------------------------- */
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("frontend", policy =>
+    {
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            // If you are NOT using cookies, AllowCredentials is not needed.
+            // Leaving it on is fine for class, but note: credentials + "*" origins is not allowed.
+            // SetIsOriginAllowed(_ => true) avoids the "*" restriction.
+            .AllowCredentials()
+            .SetIsOriginAllowed(_ => true);
+    });
+});
+
 // Swagger/OpenAPI + ✅ JWT support in Swagger UI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -72,7 +90,8 @@ if (string.IsNullOrWhiteSpace(jwtKey) ||
     string.IsNullOrWhiteSpace(jwtIssuer) ||
     string.IsNullOrWhiteSpace(jwtAudience))
 {
-    throw new InvalidOperationException("JWT settings missing. Add Jwt:Key, Jwt:Issuer, Jwt:Audience in appsettings.json");
+    throw new InvalidOperationException(
+        "JWT settings missing. Add Jwt:Key, Jwt:Issuer, Jwt:Audience in configuration (Azure App Settings: Jwt__Key, Jwt__Issuer, Jwt__Audience).");
 }
 
 builder.Services
@@ -295,23 +314,29 @@ static void SeedDevData(AppDbContext db)
 
 /* -------------------------------------------------------
  * ✅ Startup scope
+ * - Run migrations in ALL environments (fixes Azure deploy)
+ * - Seed DEV sample data only in Development
+ * - Always seed roles
+ * - Optionally seed first admin (config-controlled)
  * ------------------------------------------------------- */
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
 
-    // Dev-only migrate + seed sample data
+    // ✅ Always migrate so Azure creates schema
+    var db = services.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+
+    // ✅ Dev-only sample data
     if (app.Environment.IsDevelopment())
     {
-        var db = services.GetRequiredService<AppDbContext>();
-        db.Database.Migrate();
         SeedDevData(db);
     }
 
-    // Always seed roles
+    // ✅ Always seed roles
     await SeedRolesAsync(services);
 
-    // Bootstrap initial admin (config-controlled)
+    // ✅ Bootstrap initial admin (config-controlled)
     await SeedAdminUserAsync(services, builder.Configuration);
 }
 
@@ -323,6 +348,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// ✅ CORS must be before auth/authorization for preflight requests
+app.UseCors("frontend");
 
 // IMPORTANT: auth must be before authorization
 app.UseAuthentication();
