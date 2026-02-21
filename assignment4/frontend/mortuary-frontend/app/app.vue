@@ -9,21 +9,16 @@
         <NuxtLink to="/" class="nav-item">Home</NuxtLink>
         <NuxtLink to="/public" class="nav-item">Cases</NuxtLink>
 
+        <!-- Only show Account if logged in AND (Admin OR Mortician) -->
+        <NuxtLink v-if="canSeeAccount" to="/account" class="nav-item">Account</NuxtLink>
+
         <!-- If NOT logged in -->
-        <NuxtLink
-          v-if="!isLoggedIn"
-          to="/login"
-          class="nav-item"
-        >
+        <NuxtLink v-if="!isLoggedIn" to="/login" class="nav-item">
           Login
         </NuxtLink>
 
         <!-- If logged in -->
-        <button
-          v-else
-          class="nav-item logout-btn"
-          @click="handleLogout"
-        >
+        <button v-else class="nav-item logout-btn" type="button" @click="handleLogout">
           Log Out
         </button>
       </div>
@@ -34,22 +29,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, onMounted } from "vue"
 import { useRouter } from "vue-router"
+import { useAuth } from "../composables/useAuth"
 
 const router = useRouter()
-const user = ref(null)
+const { user, roles, logout, initAuth } = useAuth()
 
-// computed login state
+onMounted(() => {
+  // restores token + fetches /me so user/roles are available after refresh
+  initAuth()
+})
+
 const isLoggedIn = computed(() => !!user.value)
+const isAdmin = computed(() => roles.value?.includes("Admin"))
+const isMortician = computed(() => roles.value?.includes("Mortician"))
 
-async function handleLogout() {
-  user.value = null
+// Only Admin or Mortician can see Account link
+const canSeeAccount = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
+
+function handleLogout() {
+  logout()
   router.push("/")
-}
-
-async function logout() {
-  user.value = null
 }
 </script>
 
