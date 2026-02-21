@@ -16,10 +16,8 @@ builder.Services.AddControllers();
 /* -------------------------------------------------------
  * ✅ CORS (so Nuxt Static Web App can call this API)
  *
- * In Azure App Service -> Configuration -> Application settings:
+ * Azure App Service -> Configuration -> Application settings:
  *   CORS_ALLOWED_ORIGINS = https://agreeable-sea-009a0fe0f1.azurestaticapps.net;https://<your-custom-domain>
- *
- * In dev we also allow localhost.
  * ------------------------------------------------------- */
 var allowedOrigins = new List<string>
 {
@@ -31,8 +29,7 @@ var corsFromConfig = builder.Configuration["CORS_ALLOWED_ORIGINS"];
 if (!string.IsNullOrWhiteSpace(corsFromConfig))
 {
     allowedOrigins.AddRange(
-        corsFromConfig
-            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        corsFromConfig.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     );
 }
 
@@ -42,8 +39,6 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
-        // ✅ If you are not using cookies, you don't need AllowCredentials.
-        // Leaving it OFF avoids the strict "credentials" rules and is safer.
         policy
             .WithOrigins(allowedOrigins.ToArray())
             .AllowAnyHeader()
@@ -57,7 +52,6 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "MortuaryAssistant.Api", Version = "v1" });
 
-    // ✅ Add the "Authorize" button for Bearer tokens
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -73,7 +67,7 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
                 {
                     Type = ReferenceType.SecurityScheme,
                     Id = "Bearer"
@@ -84,9 +78,19 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// Database
+// ✅ Database: fail-fast with a clear error message if missing in Azure
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    // In Development, you might want to allow missing connection string.
+    // In Azure/Production, missing DB config should be treated as a deployment/config error.
+    throw new InvalidOperationException(
+        "Missing connection string 'DefaultConnection'. " +
+        "In Azure App Service -> Configuration -> Connection strings, add DefaultConnection (Type: SQLAzure).");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(connectionString));
 
 // Identity + Roles
 builder.Services
@@ -101,7 +105,7 @@ builder.Services
     .AddEntityFrameworkStores<AppDbContext>()
     .AddDefaultTokenProviders();
 
-// ✅ JWT Auth
+// ✅ JWT Auth (also fail-fast, but with clearer message)
 var jwtKey = builder.Configuration["Jwt:Key"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var jwtAudience = builder.Configuration["Jwt:Audience"];
@@ -111,8 +115,8 @@ if (string.IsNullOrWhiteSpace(jwtKey) ||
     string.IsNullOrWhiteSpace(jwtAudience))
 {
     throw new InvalidOperationException(
-        "JWT settings missing. Add Jwt:Key, Jwt:Issuer, Jwt:Audience in configuration " +
-        "(Azure App Settings: Jwt__Key, Jwt__Issuer, Jwt__Audience).");
+        "JWT settings missing. In Azure App Service -> Configuration -> Application settings add:\n" +
+        "  Jwt__Key, Jwt__Issuer, Jwt__Audience");
 }
 
 builder.Services
@@ -207,8 +211,7 @@ static async Task SeedAdminUserAsync(IServiceProvider services, IConfiguration c
 }
 
 /* -------------------------------------------------------
- * ✅ DEV Seed: workflow templates, equipment, sample cases,
- *    decedents, tasks, notes (DEV ONLY)
+ * ✅ DEV data seeding (optional toggle)
  * ------------------------------------------------------- */
 static void SeedDevData(AppDbContext db)
 {
@@ -328,26 +331,23 @@ static void SeedDevData(AppDbContext db)
 }
 
 /* -------------------------------------------------------
- * ✅ Startup scope
- * - Run migrations if connection exists
- * - Seed DEV data only in Development
- * - Always seed roles
- * - Optionally seed first admin
+ * ✅ Startup scope:
+ * - Migrate DB
+ * - Seed roles
+ * - Optional: seed first admin
+ * - Optional: seed sample data if toggled
  * ------------------------------------------------------- */
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-
     var db = services.GetRequiredService<AppDbContext>();
 
-    // ✅ Only try migrate if a connection string is present
-    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
-    if (!string.IsNullOrWhiteSpace(cs))
-    {
-        db.Database.Migrate();
-    }
+    // Always migrate on startup (Azure will do this too)
+    db.Database.Migrate();
 
-    if (app.Environment.IsDevelopment())
+    // Optional sample seed (use config flag instead of environment)
+    // Azure App Settings: SeedSampleData__Enabled = true/false
+    if (builder.Configuration.GetValue<bool>("SeedSampleData:Enabled"))
     {
         SeedDevData(db);
     }
@@ -356,8 +356,12 @@ using (var scope = app.Services.CreateScope())
     await SeedAdminUserAsync(services, builder.Configuration);
 }
 
-// Swagger only in dev
-if (app.Environment.IsDevelopment())
+/* -------------------------------------------------------
+ * ✅ Swagger in Azure (optional)
+ * Azure App Settings: Swagger__Enabled = true
+ * ------------------------------------------------------- */
+var swaggerEnabled = app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Swagger:Enabled");
+if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -365,10 +369,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// ✅ CORS must be before auth/authorization for preflight requests
+// CORS before auth
 app.UseCors("frontend");
 
-// IMPORTANT: auth must be before authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
