@@ -10,10 +10,12 @@ public class CaseFile
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // ✅ "Public" / basic info you already had
     public string NextOfKinName { get; set; } = "";
 
-    // ✅ New relationships
+    // ✅ Assigned Mortician
+    public string? AssignedMorticianUserId { get; set; }
+    public ApplicationUser? AssignedMortician { get; set; }
+
     public Decedent? Decedent { get; set; }
 
     public List<CaseTask> Tasks { get; set; } = new();

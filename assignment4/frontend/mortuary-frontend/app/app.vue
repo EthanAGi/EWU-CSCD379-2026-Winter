@@ -7,7 +7,12 @@
 
       <div class="nav-links">
         <NuxtLink to="/" class="nav-item">Home</NuxtLink>
-        <NuxtLink to="/public" class="nav-item">Cases</NuxtLink>
+
+        <!-- Public case board (everyone) -->
+        <NuxtLink to="/public" class="nav-item">Public Board</NuxtLink>
+
+        <!-- Cases page (Admin OR Mortician) -->
+        <NuxtLink v-if="canSeeCases" to="/cases" class="nav-item">Cases</NuxtLink>
 
         <!-- Only show Account if logged in AND (Admin OR Mortician) -->
         <NuxtLink v-if="canSeeAccount" to="/account" class="nav-item">Account</NuxtLink>
@@ -37,7 +42,6 @@ const router = useRouter()
 const { user, roles, logout, initAuth } = useAuth()
 
 onMounted(() => {
-  // restores token + fetches /me so user/roles are available after refresh
   initAuth()
 })
 
@@ -45,8 +49,8 @@ const isLoggedIn = computed(() => !!user.value)
 const isAdmin = computed(() => roles.value?.includes("Admin"))
 const isMortician = computed(() => roles.value?.includes("Mortician"))
 
-// Only Admin or Mortician can see Account link
 const canSeeAccount = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
+const canSeeCases = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
 
 function handleLogout() {
   logout()

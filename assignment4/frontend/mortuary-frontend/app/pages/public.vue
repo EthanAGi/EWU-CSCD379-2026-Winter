@@ -3,7 +3,8 @@
     <h1>Public Case Board</h1>
 
     <p class="muted">
-      Shows case status information from the database (public requirement).
+      Shows case status information from the database (public requirement). Admins and Morticians can view
+      additional details.
     </p>
 
     <div v-if="pending">Loading…</div>
@@ -12,19 +13,39 @@
       {{ errorMessage }}
     </div>
 
-    <table v-else class="table">
+    <div v-else class="card" style="margin-bottom: 14px">
+      <div class="row" style="justify-content: space-between; align-items: center">
+        <div class="muted small">
+          Signed in:
+          <strong>{{ isLoggedIn ? "Yes" : "No" }}</strong>
+          <span v-if="isLoggedIn"> • Roles: <strong>{{ (authRoles || []).join(", ") || "—" }}</strong></span>
+        </div>
+
+        <button class="btn" type="button" @click="refreshAll" :disabled="pending">
+          Refresh
+        </button>
+      </div>
+
+      <div v-if="!canSeeVerbose" class="muted small" style="margin-top: 8px">
+        Limited view: sign in as Admin or Mortician to see decedent and case details.
+      </div>
+
+      <div v-else class="muted small" style="margin-top: 8px">
+        Verbose view enabled.
+      </div>
+    </div>
+
+    <table v-if="cases.length" class="table">
       <thead>
         <tr>
           <th>Case #</th>
           <th>Status</th>
           <th>Created</th>
 
-          <!-- Admin/Mortician only -->
           <th v-if="canSeeVerbose">Decedent</th>
-          <th v-if="canSeeVerbose">Status last changed</th>
+          <th v-if="canSeeVerbose">Assigned Mortician</th>
 
-          <!-- Optional “view details” action -->
-          <th v-if="canSeeVerbose" style="width: 110px;">Details</th>
+          <th v-if="canSeeVerbose" style="width: 110px">Details</th>
         </tr>
       </thead>
 
@@ -34,13 +55,12 @@
           <td>{{ c.status }}</td>
           <td>{{ formatDate(c.createdAt) }}</td>
 
-          <!-- Admin/Mortician only -->
           <td v-if="canSeeVerbose">
             {{ verboseByCase[c.caseNumber]?.decedentName ?? "—" }}
           </td>
 
           <td v-if="canSeeVerbose">
-            {{ formatDate(verboseByCase[c.caseNumber]?.statusChangedAt ?? null) }}
+            {{ verboseByCase[c.caseNumber]?.assignedMorticianName ?? "—" }}
           </td>
 
           <td v-if="canSeeVerbose">
@@ -52,11 +72,13 @@
       </tbody>
     </table>
 
+    <div v-else class="muted">No cases found.</div>
+
     <!-- Expanded details preview (Admin/Mortician only) -->
     <div v-if="canSeeVerbose && openCaseNumber" class="details card">
       <div class="detailsHead">
         <h2 class="h2">Case Details: {{ openCaseNumber }}</h2>
-        <button class="btn" type="button" @click="openCaseNumber = null">Close</button>
+        <button class="btn" type="button" @click="closeDetails">Close</button>
       </div>
 
       <div v-if="detailsError" class="error">{{ detailsError }}</div>
@@ -67,6 +89,13 @@
         <div class="kv"><span class="k">Status</span><span class="v">{{ openDetails.status }}</span></div>
         <div class="kv"><span class="k">Created</span><span class="v">{{ formatDate(openDetails.createdAt) }}</span></div>
         <div class="kv"><span class="k">Next of Kin</span><span class="v">{{ openDetails.nextOfKinName || "—" }}</span></div>
+
+        <div class="kv">
+          <span class="k">Assigned Mortician</span>
+          <span class="v">
+            {{ openDetails.assignedMortician?.displayName ?? openDetails.assignedMortician?.email ?? "—" }}
+          </span>
+        </div>
 
         <div class="section">
           <div class="sectionTitle">Decedent</div>
@@ -152,13 +181,15 @@ import { $fetch } from "ofetch"
 import { useAuth } from "../../composables/useAuth"
 
 /** -----------------------------
- * Types (match your API output)
+ * Types
  * ----------------------------- */
 type PublicCase = {
   caseNumber: string
-  status: string // your API returns Status = c.Status.ToString()
+  status: string
   createdAt: string
 }
+
+type MorticianLite = { id: string; email: string | null; displayName: string | null }
 
 type WorkflowStepTemplateDto = {
   id: number
@@ -231,24 +262,27 @@ type CaseDetailsDto = {
   tasks: CaseTaskDto[]
   notes: CaseNoteDto[]
   equipmentCheckouts: EquipmentCheckoutDto[]
-
-  // future-ready: if you later add this to backend, we’ll use it
-  statusChangedAt?: string | null
+  assignedMortician?: MorticianLite | null
+  assignedMorticianUserId?: string | null
 }
 
 /** -----------------------------
- * Auth / role gating
+ * Auth (from your composable)
  * ----------------------------- */
-const { roles, token, initAuth } = useAuth()
+const { token, roles, isLoggedIn, loadFromStorage, fetchMe } = useAuth()
 
+// expose roles for template (avoid confusion with local variables)
+const authRoles = computed(() => roles.value ?? [])
+
+// Use roles to gate verbose content
 const canSeeVerbose = computed(() => {
-  const rs = roles.value ?? []
+  const rs = authRoles.value
   return rs.includes("Admin") || rs.includes("Mortician")
 })
 
+// Helper for protected calls
 function authHeaders(): Record<string, string> {
-  const t = token.value
-  return t ? { Authorization: `Bearer ${t}` } : {}
+  return token.value ? { Authorization: `Bearer ${token.value}` } : {}
 }
 
 /** -----------------------------
@@ -258,14 +292,10 @@ const cases = ref<PublicCase[]>([])
 const pending = ref(true)
 const errorMessage = ref<string | null>(null)
 
-/**
- * For privileged users, we fetch details to show:
- * - decedent name
- * - status changed time (best effort unless backend provides it explicitly)
- */
-const verboseByCase = ref<Record<string, { decedentName: string; statusChangedAt: string | null }>>({})
+const verboseByCase = ref<
+  Record<string, { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null }>
+>({})
 
-/** details panel (optional) */
 const openCaseNumber = ref<string | null>(null)
 const openDetails = ref<CaseDetailsDto | null>(null)
 const detailsPending = ref(false)
@@ -280,30 +310,11 @@ function formatDate(iso: string | null | undefined) {
   return isNaN(d.getTime()) ? "—" : d.toLocaleString()
 }
 
-/**
- * Since your DB/API does NOT currently track a real "status changed at",
- * we do a best-effort estimate from tasks:
- * - pick the latest of (completedAt, startedAt, createdAt) across all tasks
- * - fallback to case.createdAt
- * If you later add CaseFile.StatusChangedAt and return it as statusChangedAt,
- * this function will automatically use it.
- */
-function computeStatusChangedAt(d: CaseDetailsDto): string | null {
-  if (d.statusChangedAt) return d.statusChangedAt
-
-  const stamps: number[] = []
-
-  // include case created
-  stamps.push(new Date(d.createdAt).getTime())
-
-  for (const t of d.tasks ?? []) {
-    if (t.completedAt) stamps.push(new Date(t.completedAt).getTime())
-    if (t.startedAt) stamps.push(new Date(t.startedAt).getTime())
-    if (t.createdAt) stamps.push(new Date(t.createdAt).getTime())
-  }
-
-  const max = Math.max(...stamps.filter((n) => !isNaN(n)))
-  return isFinite(max) ? new Date(max).toISOString() : null
+function closeDetails() {
+  openCaseNumber.value = null
+  openDetails.value = null
+  detailsError.value = null
+  detailsPending.value = false
 }
 
 /** -----------------------------
@@ -317,16 +328,27 @@ async function loadPublicList() {
     cases.value = await $fetch<PublicCase[]>("/api/public/cases")
   } catch (e: any) {
     errorMessage.value = e?.data?.message || e?.message || "Failed to load cases."
+    cases.value = []
   } finally {
     pending.value = false
   }
 }
 
+/**
+ * Load decedent + assigned mortician for the table (verbose users only)
+ * Uses the protected endpoint; will fail if you aren’t Admin/Mortician (which is fine).
+ */
 async function loadVerboseExtras() {
-  if (!canSeeVerbose.value) return
+  if (!canSeeVerbose.value) {
+    verboseByCase.value = {}
+    closeDetails()
+    return
+  }
 
-  // fetch details for each case number (simple approach; fine for small lists)
-  const map: Record<string, { decedentName: string; statusChangedAt: string | null }> = {}
+  const map: Record<
+    string,
+    { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null }
+  > = {}
 
   await Promise.all(
     (cases.value ?? []).map(async (c) => {
@@ -337,17 +359,20 @@ async function loadVerboseExtras() {
 
         const first = d.decedent?.firstName?.trim() ?? ""
         const last = d.decedent?.lastName?.trim() ?? ""
-        const name = (first + " " + last).trim()
+        const decedentName = (first + " " + last).trim() || "—"
+
+        const assignedName = d.assignedMortician?.displayName ?? d.assignedMortician?.email ?? null
 
         map[c.caseNumber] = {
-          decedentName: name || "—",
-          statusChangedAt: computeStatusChangedAt(d),
+          decedentName,
+          assignedMorticianName: assignedName,
+          assignedMorticianUserId: d.assignedMorticianUserId ?? null,
         }
       } catch {
-        // If one fails (permissions/404/etc), don’t break the whole page.
         map[c.caseNumber] = {
           decedentName: "—",
-          statusChangedAt: null,
+          assignedMorticianName: null,
+          assignedMorticianUserId: null,
         }
       }
     })
@@ -356,13 +381,11 @@ async function loadVerboseExtras() {
   verboseByCase.value = map
 }
 
-/** details panel: load one case */
 async function toggleRow(caseNumber: string) {
+  if (!canSeeVerbose.value) return
+
   if (openCaseNumber.value === caseNumber) {
-    openCaseNumber.value = null
-    openDetails.value = null
-    detailsError.value = null
-    detailsPending.value = false
+    closeDetails()
     return
   }
 
@@ -382,16 +405,19 @@ async function toggleRow(caseNumber: string) {
   }
 }
 
-onMounted(async () => {
-  // populate roles/token on refresh if your composable supports it
-  try {
-    await initAuth()
-  } catch {
-    // if initAuth isn't implemented or fails, the public list still works
+async function refreshAll() {
+  // Restore token from localStorage (ma_token) + populate roles via /me
+  loadFromStorage()
+  if (token.value) {
+    await fetchMe()
   }
 
   await loadPublicList()
   await loadVerboseExtras()
+}
+
+onMounted(async () => {
+  await refreshAll()
 })
 </script>
 
@@ -401,12 +427,24 @@ onMounted(async () => {
   margin: 0 auto;
   padding: 16px;
 }
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .muted {
   opacity: 0.7;
 }
+.small {
+  font-size: 12px;
+}
+
 .error {
   color: #b00020;
 }
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -417,6 +455,7 @@ onMounted(async () => {
   border: 1px solid #ddd;
   padding: 8px;
   text-align: left;
+  vertical-align: top;
 }
 .table th {
   background: #f6f6f6;
@@ -428,6 +467,10 @@ onMounted(async () => {
   border: 1px solid #111827;
   background: white;
   cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .card {
@@ -479,9 +522,5 @@ onMounted(async () => {
 .list {
   margin: 0;
   padding-left: 18px;
-}
-
-.small {
-  font-size: 12px;
 }
 </style>
