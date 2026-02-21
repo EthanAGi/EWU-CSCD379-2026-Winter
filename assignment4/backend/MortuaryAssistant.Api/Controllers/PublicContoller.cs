@@ -41,13 +41,9 @@ public class PublicController : ControllerBase
         if (string.IsNullOrWhiteSpace(caseNumber))
             return BadRequest(new { message = "Case number is required." });
 
-        // Load full graph:
-        // - Decedent (1:1)
-        // - Tasks (and their WorkflowStepTemplate + AssignedToUser if present)
-        // - Notes
-        // - EquipmentCheckouts (and their Equipment)
         var c = await _db.CaseFiles
             .AsNoTracking()
+            .Include(x => x.AssignedMortician) // ✅ FIX: include assigned mortician
             .Include(x => x.Decedent)
             .Include(x => x.Tasks)
                 .ThenInclude(t => t.WorkflowStepTemplate)
@@ -61,8 +57,6 @@ public class PublicController : ControllerBase
         if (c is null)
             return NotFound(new { message = "Case not found." });
 
-        // DTO with REAL properties from your models.
-        // Avoids circular reference issues and keeps payload consistent.
         var dto = new
         {
             c.Id,
@@ -70,6 +64,15 @@ public class PublicController : ControllerBase
             Status = c.Status.ToString(),
             c.CreatedAt,
             c.NextOfKinName,
+
+            // ✅ FIX: expose assignment at the CASE level (this is what your UI wants)
+            c.AssignedMorticianUserId,
+            AssignedMortician = c.AssignedMortician is null ? null : new
+            {
+                c.AssignedMortician.Id,
+                c.AssignedMortician.Email,
+                c.AssignedMortician.DisplayName
+            },
 
             Decedent = c.Decedent is null ? null : new
             {
