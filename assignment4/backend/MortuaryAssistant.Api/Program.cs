@@ -15,19 +15,39 @@ builder.Services.AddControllers();
 
 /* -------------------------------------------------------
  * ✅ CORS (so Nuxt Static Web App can call this API)
+ *
+ * In Azure App Service -> Configuration -> Application settings:
+ *   CORS_ALLOWED_ORIGINS = https://agreeable-sea-009a0fe0f1.azurestaticapps.net;https://<your-custom-domain>
+ *
+ * In dev we also allow localhost.
  * ------------------------------------------------------- */
+var allowedOrigins = new List<string>
+{
+    "http://localhost:3000",
+    "http://localhost:5173"
+};
+
+var corsFromConfig = builder.Configuration["CORS_ALLOWED_ORIGINS"];
+if (!string.IsNullOrWhiteSpace(corsFromConfig))
+{
+    allowedOrigins.AddRange(
+        corsFromConfig
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    );
+}
+
+allowedOrigins = allowedOrigins.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
+        // ✅ If you are not using cookies, you don't need AllowCredentials.
+        // Leaving it OFF avoids the strict "credentials" rules and is safer.
         policy
+            .WithOrigins(allowedOrigins.ToArray())
             .AllowAnyHeader()
-            .AllowAnyMethod()
-            // If you are NOT using cookies, AllowCredentials is not needed.
-            // Leaving it on is fine for class, but note: credentials + "*" origins is not allowed.
-            // SetIsOriginAllowed(_ => true) avoids the "*" restriction.
-            .AllowCredentials()
-            .SetIsOriginAllowed(_ => true);
+            .AllowAnyMethod();
     });
 });
 
@@ -91,7 +111,8 @@ if (string.IsNullOrWhiteSpace(jwtKey) ||
     string.IsNullOrWhiteSpace(jwtAudience))
 {
     throw new InvalidOperationException(
-        "JWT settings missing. Add Jwt:Key, Jwt:Issuer, Jwt:Audience in configuration (Azure App Settings: Jwt__Key, Jwt__Issuer, Jwt__Audience).");
+        "JWT settings missing. Add Jwt:Key, Jwt:Issuer, Jwt:Audience in configuration " +
+        "(Azure App Settings: Jwt__Key, Jwt__Issuer, Jwt__Audience).");
 }
 
 builder.Services
@@ -174,7 +195,6 @@ static async Task SeedAdminUserAsync(IServiceProvider services, IConfiguration c
         }
     }
 
-    // Ensure Admin role
     if (!await userManager.IsInRoleAsync(user, Roles.Admin))
     {
         var addRole = await userManager.AddToRoleAsync(user, Roles.Admin);
@@ -192,7 +212,6 @@ static async Task SeedAdminUserAsync(IServiceProvider services, IConfiguration c
  * ------------------------------------------------------- */
 static void SeedDevData(AppDbContext db)
 {
-    // 1) Workflow templates
     if (!db.WorkflowStepTemplates.Any())
     {
         db.WorkflowStepTemplates.AddRange(
@@ -206,7 +225,6 @@ static void SeedDevData(AppDbContext db)
         db.SaveChanges();
     }
 
-    // 2) Equipment
     if (!db.Equipment.Any())
     {
         db.Equipment.AddRange(
@@ -217,7 +235,6 @@ static void SeedDevData(AppDbContext db)
         db.SaveChanges();
     }
 
-    // 3) Sample cases + decedents
     if (!db.CaseFiles.Any())
     {
         var c1 = new CaseFile
@@ -272,7 +289,6 @@ static void SeedDevData(AppDbContext db)
         db.SaveChanges();
     }
 
-    // 4) Instantiate workflow tasks for each case (only if missing for that case)
     var templates = db.WorkflowStepTemplates
         .Where(t => t.IsActive)
         .OrderBy(t => t.SortOrder)
@@ -298,7 +314,6 @@ static void SeedDevData(AppDbContext db)
     }
     db.SaveChanges();
 
-    // 5) Sample notes
     if (!db.CaseNotes.Any())
     {
         var firstCaseId = db.CaseFiles.OrderBy(c => c.Id).Select(c => c.Id).First();
@@ -314,29 +329,30 @@ static void SeedDevData(AppDbContext db)
 
 /* -------------------------------------------------------
  * ✅ Startup scope
- * - Run migrations in ALL environments (fixes Azure deploy)
- * - Seed DEV sample data only in Development
+ * - Run migrations if connection exists
+ * - Seed DEV data only in Development
  * - Always seed roles
- * - Optionally seed first admin (config-controlled)
+ * - Optionally seed first admin
  * ------------------------------------------------------- */
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
 
-    // ✅ Always migrate so Azure creates schema
     var db = services.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
 
-    // ✅ Dev-only sample data
+    // ✅ Only try migrate if a connection string is present
+    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (!string.IsNullOrWhiteSpace(cs))
+    {
+        db.Database.Migrate();
+    }
+
     if (app.Environment.IsDevelopment())
     {
         SeedDevData(db);
     }
 
-    // ✅ Always seed roles
     await SeedRolesAsync(services);
-
-    // ✅ Bootstrap initial admin (config-controlled)
     await SeedAdminUserAsync(services, builder.Configuration);
 }
 
