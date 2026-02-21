@@ -1,14 +1,5 @@
 namespace MortuaryAssistant.Api.Models;
 
-public enum CaseStatus
-{
-    Intake = 0,
-    InPreparation = 1,
-    ReadyForViewing = 2,
-    ServiceScheduled = 3,
-    Completed = 4
-}
-
 public class CaseFile
 {
     public int Id { get; set; }
@@ -17,9 +8,16 @@ public class CaseFile
 
     public CaseStatus Status { get; set; } = CaseStatus.Intake;
 
-    public string DecedentName { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    // ✅ "Public" / basic info you already had
     public string NextOfKinName { get; set; } = "";
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    // ✅ New relationships
+    public Decedent? Decedent { get; set; }
+
+    public List<CaseTask> Tasks { get; set; } = new();
+    public List<CaseNote> Notes { get; set; } = new();
+
+    public List<EquipmentCheckout> EquipmentCheckouts { get; set; } = new();
 }
