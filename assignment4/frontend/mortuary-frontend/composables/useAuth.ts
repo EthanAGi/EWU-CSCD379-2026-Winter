@@ -23,27 +23,24 @@ function isClient() {
   return typeof window !== "undefined"
 }
 
+function isNetworkBlockedError(e: any) {
+  const msg = String(e?.message || "")
+  return /failed to fetch/i.test(msg) || /networkerror/i.test(msg)
+}
+
 export function useAuth() {
-  // ✅ Nuxt runtime config (typed more reliably via #imports)
   const config = useRuntimeConfig()
 
-  // ✅ Force apiBase to be treated as a string (fixes TS: '{}' has no endsWith/slice)
   const apiBase = computed(() => {
     const raw = (config.public.apiBase as unknown as string) || ""
-    return raw.replace(/\/+$/, "") // trim trailing slashes
+    return raw.replace(/\/+$/, "")
   })
 
-  /**
-   * Build an API URL that works in BOTH environments:
-   * - DEV: apiBase == ""  -> "/api/..."
-   * - PROD: apiBase == "https://<api-app-service>" -> "https://<api-app-service>/api/..."
-   */
   function apiUrl(path: string) {
     const p = path.startsWith("/") ? path : `/${path}`
     return apiBase.value ? `${apiBase.value}${p}` : p
   }
 
-  // global reactive auth state (shared across app)
   const token = useState<string | null>("auth_token", () => null)
   const roles = useState<string[]>("auth_roles", () => [])
   const user = useState<MeResponse | null>("auth_user", () => null)
@@ -58,7 +55,6 @@ export function useAuth() {
   function setToken(t: string | null) {
     token.value = t
     if (!isClient()) return
-
     if (t) localStorage.setItem(TOKEN_KEY, t)
     else localStorage.removeItem(TOKEN_KEY)
   }
@@ -73,25 +69,46 @@ export function useAuth() {
   }
 
   async function login(email: string, password: string) {
-    const res = await $fetch<AuthResponse>(apiUrl("/api/auth/login"), {
-      method: "POST",
-      body: { email, password },
-    })
+    try {
+      const res = await $fetch<AuthResponse>(apiUrl("/api/auth/login"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { email, password },
+      })
 
-    setToken(res.token)
-    setUserFromAuthResponse(res)
-    return res
+      setToken(res.token)
+      setUserFromAuthResponse(res)
+      return res
+    } catch (e: any) {
+      if (isNetworkBlockedError(e)) {
+        // This is almost always CORS or API down
+        throw new Error(
+          "Cannot reach API (likely blocked by CORS or API is down). Check API CORS to allow your Azure Static Web App domain."
+        )
+      }
+      throw e
+    }
   }
 
   async function register(email: string, password: string, displayName?: string) {
-    const res = await $fetch<AuthResponse>(apiUrl("/api/auth/register"), {
-      method: "POST",
-      body: { email, password, displayName },
-    })
+    try {
+      const res = await $fetch<AuthResponse>(apiUrl("/api/auth/register"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { email, password, displayName },
+      })
 
-    setToken(res.token)
-    setUserFromAuthResponse(res)
-    return res
+      setToken(res.token)
+      setUserFromAuthResponse(res)
+      return res
+    } catch (e: any) {
+      if (isNetworkBlockedError(e)) {
+        throw new Error(
+          "Cannot reach API (likely blocked by CORS or API is down). Check API CORS to allow your Azure Static Web App domain."
+        )
+      }
+      throw e
+    }
   }
 
   async function fetchMe() {
