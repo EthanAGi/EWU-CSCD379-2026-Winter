@@ -1,6 +1,8 @@
 # EWU-CSCD378-2026-Winter
 
-## Assignment 1
+# This assignment was rolled into Assigment #2
+
+## Assignment 1: This assignment was rolled into Assignment #2
 
 The purpose of this assignment is to solidify your learning of:
 
