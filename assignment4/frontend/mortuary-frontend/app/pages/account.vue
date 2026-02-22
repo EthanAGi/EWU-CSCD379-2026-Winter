@@ -30,7 +30,7 @@
             <th>Email</th>
             <th>Display Name</th>
             <th>Status</th>
-            <th>Roles</th>
+            <th style="width: 220px;">Role</th>
             <th style="width: 260px;">Actions</th>
           </tr>
         </thead>
@@ -40,7 +40,7 @@
             <td>{{ u.email }}</td>
             <td>{{ u.displayName ?? "-" }}</td>
 
-            <!-- ✅ Status column -->
+            <!-- Status -->
             <td>
               <span :class="u.isDisabled ? 'badge disabled' : 'badge enabled'">
                 {{ u.isDisabled ? "Disabled" : "Enabled" }}
@@ -50,45 +50,30 @@
               </div>
             </td>
 
-            <!-- Roles -->
+            <!-- ✅ Single role selector: None | Mortician | Admin -->
             <td>
-              <div class="roles">
-                <label class="role">
-                  <input type="checkbox" v-model="u.editRoles" value="Mortician" />
-                  Mortician
-                </label>
-                <label class="role">
-                  <input type="checkbox" v-model="u.editRoles" value="Admin" />
-                  Admin
-                </label>
-              </div>
+              <select class="select" v-model="u.editRole">
+                <option value="">None</option>
+                <option value="Mortician">Mortician</option>
+                <option value="Admin">Admin</option>
+              </select>
               <div class="muted small">
-                Current: {{ (u.roles ?? []).join(", ") || "None" }}
+                Current: {{ u.role || "None" }}
               </div>
             </td>
 
             <!-- Actions -->
             <td>
               <div class="actions">
-                <button class="btn" type="button" @click="saveRoles(u)" :disabled="u.saving">
-                  {{ u.saving ? "Saving..." : "Save Roles" }}
+                <button class="btn" type="button" @click="saveRole(u)" :disabled="u.saving">
+                  {{ u.saving ? "Saving..." : "Save Role" }}
                 </button>
 
-                <button
-                  class="btn"
-                  type="button"
-                  @click="toggleEnabled(u)"
-                  :disabled="u.toggling"
-                >
+                <button class="btn" type="button" @click="toggleEnabled(u)" :disabled="u.toggling">
                   {{ u.toggling ? "Working..." : u.isDisabled ? "Enable" : "Disable" }}
                 </button>
 
-                <button
-                  class="btn danger"
-                  type="button"
-                  @click="deleteUser(u)"
-                  :disabled="u.deleting"
-                >
+                <button class="btn danger" type="button" @click="deleteUser(u)" :disabled="u.deleting">
                   {{ u.deleting ? "Deleting..." : "Delete" }}
                 </button>
               </div>
@@ -121,8 +106,13 @@ type ApiUser = {
   lockoutEndUtc?: string | null
 }
 
+type Role = "" | "Admin" | "Mortician"
+
 type UiUser = ApiUser & {
-  editRoles: string[]
+  // ✅ exactly one role in UI (or none)
+  role: Role
+  editRole: Role
+
   saving: boolean
   saved: boolean
   saveError: string | null
@@ -171,9 +161,18 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${t}` }
 }
 
-function normalizeRoles(rs: string[] | null | undefined): Array<"Admin" | "Mortician"> {
-  const allowed = new Set(["Admin", "Mortician"] as const)
-  return (rs ?? []).filter((r): r is "Admin" | "Mortician" => allowed.has(r as any))
+/**
+ * ✅ Minimal single-role normalization:
+ * - If roles contain Admin => Admin
+ * - Else if roles contain Mortician => Mortician
+ * - Else => None
+ * (If your DB has both, Admin "wins" here, but we’ll fix it on save.)
+ */
+function pickSingleRole(rs: string[] | null | undefined): Role {
+  const set = new Set((rs ?? []).map((x) => (x ?? "").trim()))
+  if (set.has("Admin")) return "Admin"
+  if (set.has("Mortician")) return "Mortician"
+  return ""
 }
 
 function formatUtc(isoOrNull: string | null | undefined) {
@@ -183,11 +182,6 @@ function formatUtc(isoOrNull: string | null | undefined) {
   return d.toLocaleString()
 }
 
-/**
- * ✅ NEW: build URLs that work in BOTH environments
- * - DEV: apiBase="" -> "/api/..."
- * - PROD: apiBase="https://<appservice>" -> "https://.../api/..."
- */
 const config = useRuntimeConfig()
 const API_BASE = computed(() => (config.public as any)?.apiBase ?? "")
 
@@ -210,11 +204,13 @@ async function loadUsers() {
     })
 
     users.value = (list ?? []).map((u) => {
-      const current = normalizeRoles(u.roles)
+      const role = pickSingleRole(u.roles)
+
       return {
         ...u,
-        roles: current,
-        editRoles: [...current],
+        // store roles as-is from API, but drive UI from single role
+        role,
+        editRole: role,
 
         saving: false,
         saved: false,
@@ -234,7 +230,6 @@ async function loadUsers() {
 
 async function setRole(userId: string, role: "Admin" | "Mortician", enabled: boolean) {
   const payload: SetRoleRequest = { userId, role, enabled }
-
   return await $fetch(apiUrl("/api/admin/users/set-role"), {
     method: "POST",
     headers: authHeaders(),
@@ -242,37 +237,47 @@ async function setRole(userId: string, role: "Admin" | "Mortician", enabled: boo
   })
 }
 
-async function saveRoles(u: UiUser) {
+/**
+ * ✅ Minimal enforcement:
+ * Desired role is exactly one of: "" | "Admin" | "Mortician"
+ * We ensure:
+ * - enable desired role (if not "")
+ * - disable the other role (always)
+ */
+async function saveRole(u: UiUser) {
   u.saving = true
   u.saved = false
   u.actionOk = null
   u.saveError = null
 
+  const desired = u.editRole
+  const current = u.role
+
   try {
-    const current = new Set(normalizeRoles(u.roles))
-    const desired = new Set(normalizeRoles(u.editRoles))
-
-    const all: Array<"Admin" | "Mortician"> = ["Admin", "Mortician"]
-    const changes = all.filter((r) => current.has(r) !== desired.has(r))
-
-    if (changes.length === 0) {
+    if (desired === current) {
       u.saved = true
       setTimeout(() => (u.saved = false), 1200)
       return
     }
 
-    for (const r of changes) {
-      await setRole(u.id, r, desired.has(r))
-    }
+    // Always remove both first (safe + minimal logic).
+    // If backend is idempotent, this is fine.
+    await setRole(u.id, "Admin", false)
+    await setRole(u.id, "Mortician", false)
 
-    const newRoles = Array.from(desired)
-    u.roles = newRoles
-    u.editRoles = [...newRoles]
+    // Then apply the one role (if any).
+    if (desired === "Admin") await setRole(u.id, "Admin", true)
+    if (desired === "Mortician") await setRole(u.id, "Mortician", true)
+
+    // Update UI state
+    u.role = desired
+    u.roles = desired ? [desired] : []
+    u.editRole = desired
 
     u.saved = true
     setTimeout(() => (u.saved = false), 1200)
   } catch (e: any) {
-    u.saveError = e?.data?.message || e?.message || "Failed to save roles."
+    u.saveError = e?.data?.message || e?.message || "Failed to save role."
   } finally {
     u.saving = false
   }
@@ -358,6 +363,14 @@ onMounted(async () => {
   border-radius: 8px;
 }
 
+.select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+}
+
 .btn {
   padding: 10px 12px;
   border-radius: 8px;
@@ -398,18 +411,6 @@ tbody td {
   padding: 12px;
   border-bottom: 1px solid #e2e8f0;
   vertical-align: top;
-}
-
-.roles {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.role {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
 }
 
 .actions {
