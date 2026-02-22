@@ -5,20 +5,22 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
-  // ✅ Azure Static Web Apps: generate static site
+  // ✅ Static site for Azure Static Web Apps
   ssr: false,
 
-  // ✅ Use this in your API calls in production:
-  // const api = useRuntimeConfig().public.apiBase
+  // Make sure runtime config is available
   runtimeConfig: {
     public: {
+      // Set this in Azure Static Web App settings:
+      // NUXT_PUBLIC_API_BASE = https://mortuaryassist-api-bgb7g0ffbtd2hpe9.eastus2-01.azurewebsites.net
       apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
     },
   },
 
   /**
-   * ✅ DEV proxy only (fixes CORS during local dev)
-   * This is enough for your setup and avoids the 'nitro' type error.
+   * ✅ Local DEV only
+   * Lets you call /api/* locally without CORS.
+   * In production, apiBase should be set and the app will call the full API host.
    */
   vite: {
     server: {
@@ -30,5 +32,11 @@ export default defineNuxtConfig({
         },
       },
     },
+  },
+
+  // Optional but often helpful for static hosting
+  app: {
+    // If you later host under a subpath, you'd set baseURL here.
+    baseURL: '/',
   },
 })

@@ -35,3 +35,6 @@ jobs:
 
           # Force static generation so index.html exists
           app_build_command: "npm ci && npm run generate"
+        env:
+          # ✅ This is the KEY FIX: tells Nuxt what API base URL to bake into the static build
+          NUXT_PUBLIC_API_BASE: "https://mortuaryassist-api-bgb7g0ffbtd2hpe9.eastus2-01.azurewebsites.net"
