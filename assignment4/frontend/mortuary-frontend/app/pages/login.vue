@@ -1,36 +1,28 @@
 <template>
   <main class="wrap">
-    <h1>Create account</h1>
+    <h1>Log in</h1>
 
     <form class="card" @submit.prevent="onSubmit">
       <label>Email</label>
       <input v-model.trim="email" type="email" autocomplete="email" required />
 
-      <label>Display name (optional)</label>
-      <input
-        v-model.trim="displayName"
-        type="text"
-        autocomplete="nickname"
-        placeholder="e.g., Adminio"
-      />
-
       <label>Password</label>
       <input
         v-model="password"
         type="password"
-        autocomplete="new-password"
+        autocomplete="current-password"
         required
-        minlength="6"
       />
 
       <button :disabled="loading" type="submit">
-        {{ loading ? "Creating..." : "Create account" }}
+        {{ loading ? "Logging in..." : "Log in" }}
       </button>
 
       <p v-if="err" class="error">{{ err }}</p>
 
       <p class="muted">
-        Already have an account? <NuxtLink to="/login">Log in</NuxtLink>
+        Need an account?
+        <NuxtLink to="/register">Create account</NuxtLink>
       </p>
     </form>
   </main>
@@ -42,11 +34,10 @@ import { useRouter } from "vue-router"
 import { useAuth } from "../../composables/useAuth"
 
 const router = useRouter()
-const { register, fetchMe } = useAuth()
+const { login, fetchMe } = useAuth()
 
 const email = ref("")
 const password = ref("")
-const displayName = ref("")
 
 const loading = ref(false)
 const err = ref<string | null>(null)
@@ -56,19 +47,15 @@ async function onSubmit() {
   loading.value = true
 
   try {
-    // ✅ Matches login.vue style: call composable function, let it handle apiUrl/ofetch.
-    // Swagger: POST /api/auth/register (RegisterRequest)
-    await register(email.value, password.value, displayName.value || undefined)
+    // ✅ Correct: call login()
+    await login(email.value, password.value)
 
-    // ✅ Populate roles/user immediately (helps gated pages)
+    // ✅ Populate roles/user right away
     await fetchMe()
 
-    // ✅ Send user to public board after registration
     await router.push("/public")
   } catch (e: any) {
-    // ✅ Same error strategy as login.vue
-    // ofetch errors often put server payload on e.data
-    err.value = e?.data?.message || e?.message || "Registration failed."
+    err.value = e?.data?.message || e?.message || "Login failed."
   } finally {
     loading.value = false
   }

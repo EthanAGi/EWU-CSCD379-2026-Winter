@@ -2,11 +2,14 @@
   <div>
     <nav class="navbar">
       <div class="nav-left">
-        <NuxtLink to="/" class="brand">MortuaryAssist</NuxtLink>
+        <!-- ✅ Brand goes to Public board (not "/") -->
+        <NuxtLink to="/public" class="brand">MortuaryAssist</NuxtLink>
       </div>
 
       <div class="nav-links">
-        <NuxtLink to="/" class="nav-item">Home</NuxtLink>
+        <!-- ✅ "Home" points to public board so you never get stuck on "/" -->
+        <NuxtLink to="/public" class="nav-item">Home</NuxtLink>
+
         <NuxtLink to="/public" class="nav-item">Public Board</NuxtLink>
 
         <NuxtLink v-if="canSeeCases" to="/cases" class="nav-item">Cases</NuxtLink>
@@ -55,7 +58,6 @@
           <!-- Popover -->
           <div class="vol-pop" @click.stop>
             <div class="vol-rail" aria-hidden="true">
-              <!-- ✅ Centered + absolute so the hitbox matches the visuals -->
               <input
                 class="vol-rotated"
                 type="range"
@@ -71,8 +73,10 @@
           </div>
         </div>
 
+        <!-- ✅ Login always goes to /login -->
         <NuxtLink v-if="!isLoggedIn" to="/login" class="nav-item">Login</NuxtLink>
 
+        <!-- ✅ Logout returns user to /login (not "/") -->
         <button v-else class="nav-item logout-btn" type="button" @click="handleLogout">
           Log Out
         </button>
@@ -91,22 +95,26 @@ import { useRouter } from "vue-router"
 import { useAuth } from "../composables/useAuth"
 
 const router = useRouter()
-const { user, roles, logout, initAuth } = useAuth()
+
+// ✅ Use token-based logged in state (more reliable than user on first paint)
+const { user, roles, token, logout, initAuth } = useAuth()
 
 onMounted(async () => {
   await initAuth()
 })
 
-const isLoggedIn = computed(() => !!user.value)
+const isLoggedIn = computed(() => !!token.value)
+
 const isAdmin = computed(() => roles.value?.includes("Admin"))
 const isMortician = computed(() => roles.value?.includes("Mortician"))
 
 const canSeeAccount = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
 const canSeeCases = canSeeAccount
 
-function handleLogout() {
+async function handleLogout() {
   logout()
-  router.push("/")
+  // ✅ After logout, go to login (prevents landing on a bad "/" route)
+  await router.push("/login")
 }
 
 /* 🔊 AUDIO */
@@ -238,7 +246,7 @@ onMounted(() => {
   height: 12px;
 }
 
-/* ✅ Rail is the visible background "tube" area */
+/* Rail */
 .vol-rail {
   position: relative;
   width: 40px;
@@ -251,18 +259,12 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/*
-  ✅ Rotated horizontal slider, but now:
-  - absolutely centered
-  - has a stable hitbox
-  - aligns with the rail background
-*/
 .vol-rotated {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 140px; /* this becomes the vertical travel distance */
-  height: 28px; /* bigger hit area so it’s easy to drag */
+  width: 140px;
+  height: 28px;
   transform: translate(-50%, -50%) rotate(-90deg);
   transform-origin: center;
 
@@ -275,14 +277,12 @@ onMounted(() => {
   margin: 0;
 }
 
-/* track (webkit) */
 .vol-rotated::-webkit-slider-runnable-track {
   height: 10px;
   background: #374151;
   border-radius: 999px;
 }
 
-/* thumb (webkit) */
 .vol-rotated::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
@@ -293,14 +293,12 @@ onMounted(() => {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-/* firefox track */
 .vol-rotated::-moz-range-track {
   height: 10px;
   background: #374151;
   border-radius: 999px;
 }
 
-/* firefox thumb */
 .vol-rotated::-moz-range-thumb {
   width: 16px;
   height: 16px;
