@@ -82,8 +82,6 @@ builder.Services.AddSwaggerGen(c =>
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
-    // In Development, you might want to allow missing connection string.
-    // In Azure/Production, missing DB config should be treated as a deployment/config error.
     throw new InvalidOperationException(
         "Missing connection string 'DefaultConnection'. " +
         "In Azure App Service -> Configuration -> Connection strings, add DefaultConnection (Type: SQLAzure).");
@@ -211,7 +209,24 @@ static async Task SeedAdminUserAsync(IServiceProvider services, IConfiguration c
 }
 
 /* -------------------------------------------------------
- * ✅ DEV data seeding (optional toggle)
+ * ✅ Sample data seeding (idempotent)
+ *
+ * This seeds the same data you seed locally, but we only do it if:
+ * - SeedSampleData:Enabled is true
+ * AND
+ * - the DB looks empty (we check CaseFiles)
+ *
+ * This prevents duplicate inserts if you forget to turn it off.
+ * ------------------------------------------------------- */
+static void SeedSampleData(AppDbContext db)
+{
+    // Reuse your existing method name/body if you want;
+    // I’m calling it SeedDevData to match your current code.
+    SeedDevData(db);
+}
+
+/* -------------------------------------------------------
+ * ✅ DEV data seeding (your existing method)
  * ------------------------------------------------------- */
 static void SeedDevData(AppDbContext db)
 {
@@ -342,14 +357,16 @@ using (var scope = app.Services.CreateScope())
     var services = scope.ServiceProvider;
     var db = services.GetRequiredService<AppDbContext>();
 
-    // Always migrate on startup (Azure will do this too)
+    // Always migrate on startup
     db.Database.Migrate();
 
-    // Optional sample seed (use config flag instead of environment)
-    // Azure App Settings: SeedSampleData__Enabled = true/false
-    if (builder.Configuration.GetValue<bool>("SeedSampleData:Enabled"))
+    // ✅ Seed sample data when enabled (Azure App Setting: SeedSampleData__Enabled=true)
+    // ✅ Only seeds if CaseFiles is empty (prevents duplicates)
+    var seedEnabled = builder.Configuration.GetValue<bool>("SeedSampleData:Enabled");
+    if (seedEnabled && !db.CaseFiles.Any())
     {
-        SeedDevData(db);
+        // This will insert your sample cases + related records
+        SeedSampleData(db);
     }
 
     await SeedRolesAsync(services);
