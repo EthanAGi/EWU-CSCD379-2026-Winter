@@ -1,3 +1,5 @@
+## This has been superseded by Assignment5AndFinal for Winter 2026
+
 # Final
 Build a full stack web application.
 You can work in groups of 1-4 people, larger groups will need instructor approval
