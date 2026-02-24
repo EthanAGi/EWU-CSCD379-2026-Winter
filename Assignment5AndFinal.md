@@ -32,5 +32,40 @@ You need to have the following slides, then demo the application. Please bring a
 ### Demo
 Demo the application and answer classmates' and instructors' questions.
 
-- Sel
-- ect pagination record count
+## Schedule:
+
+Assigned on Thursday, February 26th
+Requirements due in class on Tuesday, March 3rd
+UI due in class on Thursday, March 5th
+Code is submitted into Teams channel by 11:59pm Thursday, March 12th
+Code Review assigned on Friday, March 13th, and is due Sunday, March 15th at 11:59pm
+Final on March 19th 3:30-5:30pm
+
+### Details:
+
+Requirements:
+- Markdown file
+- Listing what the app is supposed to do (informal!)
+- looking for:
+  - elevator pitch: 1-4 sentence of what my app does, why it exists, why the world needs the app
+  - target audience (who are the users?)
+  - use cases
+  - what is the tech stack
+  - technical requirements
+  - this is basically your prompt
+
+UI:
+- mockups of what the UI looks like
+- recommend using AI to do UI mockups (semi-building up the UI)
+- also informal :)
+- could use screenshots, canva, etc.
+- looking for:
+  - basic flow of the app
+
+Code review:
+- is the normal code review that we usually do
+
+## Brainstorming:
+What could you potentially do?:
+- something you're passionate about! :)
+- something with horses
