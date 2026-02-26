@@ -6,12 +6,14 @@
         <NuxtLink to="/public" class="brand" @click="closeMobileMenu">MortuaryAssist</NuxtLink>
       </div>
 
-      <!-- Desktop links (unchanged look) -->
+      <!-- Desktop links -->
       <div class="nav-links desktop">
-        <NuxtLink to="/public" class="nav-item">Home</NuxtLink>
+        <!-- ✅ Removed Home -->
+
         <NuxtLink to="/public" class="nav-item">Public Board</NuxtLink>
 
         <NuxtLink v-if="canSeeCases" to="/cases" class="nav-item">Cases</NuxtLink>
+        <!-- ✅ Account only for Admins -->
         <NuxtLink v-if="canSeeAccount" to="/account" class="nav-item">Account</NuxtLink>
 
         <!-- 🔊 Audio Control (desktop hover popover) -->
@@ -105,11 +107,7 @@
       aria-hidden="true"
     ></div>
 
-    <aside
-      class="mobile-panel"
-      :class="{ open: mobileOpen }"
-      aria-label="Mobile navigation"
-    >
+    <aside class="mobile-panel" :class="{ open: mobileOpen }" aria-label="Mobile navigation">
       <div class="mobile-panel-head">
         <NuxtLink to="/public" class="mobile-brand" @click="closeMobileMenu">
           MortuaryAssist
@@ -121,7 +119,7 @@
       </div>
 
       <div class="mobile-links">
-        <NuxtLink to="/public" class="mobile-item" @click="closeMobileMenu">Home</NuxtLink>
+        <!-- ✅ Removed Home -->
         <NuxtLink to="/public" class="mobile-item" @click="closeMobileMenu">Public Board</NuxtLink>
 
         <NuxtLink
@@ -133,6 +131,7 @@
           Cases
         </NuxtLink>
 
+        <!-- ✅ Account only for Admins -->
         <NuxtLink
           v-if="canSeeAccount"
           to="/account"
@@ -237,8 +236,13 @@ const isLoggedIn = computed(() => !!token.value)
 const isAdmin = computed(() => roles.value?.includes("Admin"))
 const isMortician = computed(() => roles.value?.includes("Mortician"))
 
-const canSeeAccount = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
-const canSeeCases = canSeeAccount
+/**
+ * ✅ Rules:
+ * - Cases: Admin OR Mortician (same as before)
+ * - Account: Admin ONLY
+ */
+const canSeeCases = computed(() => isLoggedIn.value && (isAdmin.value || isMortician.value))
+const canSeeAccount = computed(() => isLoggedIn.value && isAdmin.value)
 
 async function handleLogout() {
   logout()
@@ -577,10 +581,15 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
+
+  /* ✅ Prevent "button overflow" on tiny screens */
+  max-width: 100%;
 }
 
 .mobile-item {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   text-align: left;
   padding: 12px 12px;
   border-radius: 12px;
@@ -590,6 +599,10 @@ onMounted(() => {
   text-decoration: none;
   font: inherit;
   cursor: pointer;
+
+  /* ✅ Ensure long text never forces overflow */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .mobile-item:hover {
   background: rgba(255, 255, 255, 0.06);
@@ -606,6 +619,8 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 12px;
   padding: 12px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .mobile-audio-row {
