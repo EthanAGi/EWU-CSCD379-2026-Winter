@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using MortuaryAssistant.Api.Constants;
 using MortuaryAssistant.Api.Data;
 using MortuaryAssistant.Api.Models;
+using MortuaryAssistant.Api.Services;
 
 namespace MortuaryAssistant.Api.Controllers;
 
@@ -15,49 +16,51 @@ public class CaseFilesController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly UserManager<ApplicationUser> _users;
+    private readonly ICaseService _cases;
 
-    public CaseFilesController(AppDbContext db, UserManager<ApplicationUser> users)
+    public CaseFilesController(AppDbContext db, UserManager<ApplicationUser> users, ICaseService cases)
     {
         _db = db;
         _users = users;
+        _cases = cases;
     }
 
     // ✅ List cases:
     // - scope=mine  -> mortician gets only assigned cases
-    // - scope=all   -> admin gets all cases
+    // - scope=all   -> admin gets all cases (delegates to CaseService)
     [HttpGet]
     public async Task<IActionResult> ListCases([FromQuery] string scope = "mine")
     {
         var user = await _users.GetUserAsync(User);
         if (user == null) return Unauthorized();
 
-        // Base query for case files + decedent
-        IQueryable<CaseFile> q = _db.CaseFiles
-            .Include(x => x.Decedent);
-
+        // ✅ "all" is handled by the service (anything the service does, we leave to it)
         if (string.Equals(scope, "all", StringComparison.OrdinalIgnoreCase))
         {
             if (!User.IsInRole(Roles.Admin))
                 return Forbid();
+
+            var sr = await _cases.GetAllCasesAsync();
+            return ToActionResult(sr);
+        }
+
+        // scope=mine (not provided by CaseService, so controller keeps the richer query)
+        IQueryable<CaseFile> q = _db.CaseFiles.Include(x => x.Decedent);
+
+        if (User.IsInRole(Roles.Mortician))
+        {
+            q = q.Where(x => x.AssignedMorticianUserId == user.Id);
+        }
+        else if (User.IsInRole(Roles.Admin))
+        {
+            // Admin "mine" -> all by default (your current behavior)
         }
         else
         {
-            if (User.IsInRole(Roles.Mortician))
-            {
-                q = q.Where(x => x.AssignedMorticianUserId == user.Id);
-            }
-            else if (User.IsInRole(Roles.Admin))
-            {
-                // Admin "mine" -> all by default
-            }
-            else
-            {
-                return Forbid();
-            }
+            return Forbid();
         }
 
-        // ✅ IMPORTANT:
-        // Resolve assigned mortician via left join on Users, ignoring any global filters on ApplicationUser
+        // ✅ Resolve assigned mortician via left join on Users, ignoring any global filters on ApplicationUser
         var results = await (
             from c in q
             join m in _users.Users.IgnoreQueryFilters()
@@ -115,22 +118,18 @@ public class CaseFilesController : ControllerBase
             CreatedAt = DateTime.UtcNow
         };
 
-        // ✅ Determine creator role
         var creatorIsMortician =
             User.IsInRole(Roles.Mortician) || await _users.IsInRoleAsync(creator, Roles.Mortician);
 
         var creatorIsAdmin =
             User.IsInRole(Roles.Admin) || await _users.IsInRoleAsync(creator, Roles.Admin);
 
-        // ✅ Assignment rules
         if (creatorIsMortician)
         {
-            // Morticians always auto-assign to themselves
             entity.AssignedMorticianUserId = creator.Id;
         }
         else if (creatorIsAdmin)
         {
-            // Admins may optionally assign a mortician during creation
             var requestedId = request.AssignedMorticianUserId?.Trim();
             if (!string.IsNullOrWhiteSpace(requestedId))
             {
@@ -143,10 +142,8 @@ public class CaseFilesController : ControllerBase
 
                 entity.AssignedMorticianUserId = mort.Id;
             }
-            // else: leave unassigned
         }
 
-        // Optional Decedent creation (only if name provided)
         if (request.Decedent != null &&
             (!string.IsNullOrWhiteSpace(request.Decedent.FirstName) ||
              !string.IsNullOrWhiteSpace(request.Decedent.LastName)))
@@ -166,7 +163,6 @@ public class CaseFilesController : ControllerBase
         _db.CaseFiles.Add(entity);
         await _db.SaveChangesAsync();
 
-        // Auto-create workflow tasks from active templates
         var templates = await _db.WorkflowStepTemplates
             .Where(t => t.IsActive)
             .OrderBy(t => t.SortOrder)
@@ -204,7 +200,6 @@ public class CaseFilesController : ControllerBase
 
         await EnforceCaseAccess(c);
 
-        // ✅ Resolve mortician ignoring global filters
         var m = await _users.Users.IgnoreQueryFilters()
             .Where(u => u.Id == c.AssignedMorticianUserId)
             .Select(u => new { u.Id, u.Email, u.DisplayName })
@@ -245,7 +240,6 @@ public class CaseFilesController : ControllerBase
 
         await EnforceCaseAccess(c);
 
-        // ✅ Resolve mortician ignoring global filters
         var m = await _users.Users.IgnoreQueryFilters()
             .Where(u => u.Id == c.AssignedMorticianUserId)
             .Select(u => new { u.Id, u.Email, u.DisplayName })
@@ -262,9 +256,7 @@ public class CaseFilesController : ControllerBase
     // 🟢 Assign Mortician (Admin only)
     [Authorize(Roles = Roles.Admin)]
     [HttpPost("{caseNumber}/assign-mortician")]
-    public async Task<IActionResult> AssignMortician(
-        string caseNumber,
-        [FromBody] AssignMorticianRequest request)
+    public async Task<IActionResult> AssignMortician(string caseNumber, [FromBody] AssignMorticianRequest request)
     {
         var c = await _db.CaseFiles.FirstOrDefaultAsync(x => x.CaseNumber == caseNumber);
         if (c == null) return NotFound(new { message = "Case not found." });
@@ -449,6 +441,17 @@ public class CaseFilesController : ControllerBase
     }
 
     // ---- helpers
+
+    private IActionResult ToActionResult(ServiceResult<object> result)
+    {
+        // ✅ FIX: ServiceResult<T> uses "Ok" (bool) not "Success".
+        // "Success" is a static factory method, so "result.Success" becomes a method group (CS0428).
+        if (result.Ok)
+            return StatusCode(result.StatusCode, result.Value);
+
+        return StatusCode(result.StatusCode, new { message = result.Error ?? "Request failed." });
+    }
+
     private async Task EnforceCaseAccess(CaseFile c)
     {
         var user = await _users.GetUserAsync(User);

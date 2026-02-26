@@ -7,17 +7,18 @@ using Microsoft.OpenApi.Models;
 using MortuaryAssistant.Api.Constants;
 using MortuaryAssistant.Api.Data;
 using MortuaryAssistant.Api.Models;
+using MortuaryAssistant.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Controllers
+// Controllers (this automatically includes ALL controllers in your project)
 builder.Services.AddControllers();
 
 /* -------------------------------------------------------
  * ✅ CORS (so Nuxt Static Web App can call this API)
  *
  * Azure App Service -> Configuration -> Application settings:
- *   CORS_ALLOWED_ORIGINS = https://agreeable-sea-009a0fe0f1.azurestaticapps.net;https://<your-custom-domain>
+ *   CORS_ALLOWED_ORIGINS = https://your-staticapp.azurestaticapps.net;https://your-domain.com
  * ------------------------------------------------------- */
 var allowedOrigins = new List<string>
 {
@@ -67,7 +68,7 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                Reference = new OpenApiReference
                 {
                     Type = ReferenceType.SecurityScheme,
                     Id = "Bearer"
@@ -95,6 +96,7 @@ builder.Services
     .AddIdentity<ApplicationUser, IdentityRole>(options =>
     {
         options.User.RequireUniqueEmail = true;
+
         options.Password.RequiredLength = 8;
         options.Password.RequireDigit = true;
         options.Password.RequireUppercase = true;
@@ -103,7 +105,12 @@ builder.Services
     .AddEntityFrameworkStores<AppDbContext>()
     .AddDefaultTokenProviders();
 
-// ✅ JWT Auth (also fail-fast, but with clearer message)
+// ✅ Register YOUR app services (DI)
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+builder.Services.AddScoped<ICaseService, CaseService>();
+
+// ✅ JWT Auth (fail-fast, clear message)
 var jwtKey = builder.Configuration["Jwt:Key"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var jwtAudience = builder.Configuration["Jwt:Audience"];
@@ -117,6 +124,17 @@ if (string.IsNullOrWhiteSpace(jwtKey) ||
         "  Jwt__Key, Jwt__Issuer, Jwt__Audience");
 }
 
+/*
+ * ✅ IMPORTANT FIX:
+ * Your AuthService.cs (token minting) previously used audience = jwtIssuer.
+ * But validation expects jwtAudience.
+ *
+ * To prevent 401s when tokens were minted with aud=issuer, we accept BOTH:
+ *  - Jwt:Audience
+ *  - Jwt:Issuer
+ *
+ * You should STILL fix AuthService.cs to mint audience = Jwt:Audience.
+ */
 builder.Services
     .AddAuthentication(options =>
     {
@@ -133,7 +151,11 @@ builder.Services
             ValidateLifetime = true,
 
             ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
+
+            // ✅ Accept both configured audience and issuer as "valid audiences"
+            // (handles older tokens minted with aud=issuer)
+            ValidAudiences = new[] { jwtAudience, jwtIssuer },
+
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ClockSkew = TimeSpan.FromMinutes(2)
         };
@@ -209,24 +231,7 @@ static async Task SeedAdminUserAsync(IServiceProvider services, IConfiguration c
 }
 
 /* -------------------------------------------------------
- * ✅ Sample data seeding (idempotent)
- *
- * This seeds the same data you seed locally, but we only do it if:
- * - SeedSampleData:Enabled is true
- * AND
- * - the DB looks empty (we check CaseFiles)
- *
- * This prevents duplicate inserts if you forget to turn it off.
- * ------------------------------------------------------- */
-static void SeedSampleData(AppDbContext db)
-{
-    // Reuse your existing method name/body if you want;
-    // I’m calling it SeedDevData to match your current code.
-    SeedDevData(db);
-}
-
-/* -------------------------------------------------------
- * ✅ DEV data seeding (your existing method)
+ * ✅ DEV/Sample data seeding (idempotent)
  * ------------------------------------------------------- */
 static void SeedDevData(AppDbContext db)
 {
@@ -357,20 +362,17 @@ using (var scope = app.Services.CreateScope())
     var services = scope.ServiceProvider;
     var db = services.GetRequiredService<AppDbContext>();
 
-    // Always migrate on startup
     db.Database.Migrate();
 
-    // ✅ Seed sample data when enabled (Azure App Setting: SeedSampleData__Enabled=true)
-    // ✅ Only seeds if CaseFiles is empty (prevents duplicates)
+    // ✅ Roles FIRST, then admin (admin role must exist)
+    await SeedRolesAsync(services);
+    await SeedAdminUserAsync(services, builder.Configuration);
+
     var seedEnabled = builder.Configuration.GetValue<bool>("SeedSampleData:Enabled");
     if (seedEnabled && !db.CaseFiles.Any())
     {
-        // This will insert your sample cases + related records
-        SeedSampleData(db);
+        SeedDevData(db);
     }
-
-    await SeedRolesAsync(services);
-    await SeedAdminUserAsync(services, builder.Configuration);
 }
 
 /* -------------------------------------------------------
@@ -386,12 +388,12 @@ if (swaggerEnabled)
 
 app.UseHttpsRedirection();
 
-// CORS before auth
 app.UseCors("frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+// This maps ALL controller routes (AuthController, PublicController, CaseFilesController, MorticianController, AdminUsersController, etc.)
 app.MapControllers();
 
 app.Run();

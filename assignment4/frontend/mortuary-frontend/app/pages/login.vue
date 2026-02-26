@@ -3,16 +3,11 @@
     <h1>Log in</h1>
 
     <form class="card" @submit.prevent="onSubmit">
-      <label>Email</label>
-      <input v-model.trim="email" type="email" autocomplete="email" required />
+      <label for="email">Email</label>
+      <input id="email" v-model.trim="email" type="email" autocomplete="email" required />
 
-      <label>Password</label>
-      <input
-        v-model="password"
-        type="password"
-        autocomplete="current-password"
-        required
-      />
+      <label for="pw">Password</label>
+      <input id="pw" v-model="password" type="password" autocomplete="current-password" required />
 
       <button :disabled="loading" type="submit">
         {{ loading ? "Logging in..." : "Log in" }}
@@ -38,7 +33,6 @@ const { login, fetchMe } = useAuth()
 
 const email = ref("")
 const password = ref("")
-
 const loading = ref(false)
 const err = ref<string | null>(null)
 
@@ -47,15 +41,19 @@ async function onSubmit() {
   loading.value = true
 
   try {
-    // ✅ Correct: call login()
     await login(email.value, password.value)
 
-    // ✅ Populate roles/user right away
-    await fetchMe()
+    const me = await fetchMe()
+    if (!me) {
+      err.value =
+        "Login succeeded, but token validation failed on /api/auth/me (401). This is almost always a JWT Issuer/Audience mismatch on the API."
+      return
+    }
 
-    await router.push("/public")
+    await router.replace("/public")
   } catch (e: any) {
-    err.value = e?.data?.message || e?.message || "Login failed."
+    const status = e?.status || e?.response?.status
+    err.value = e?.data?.message || e?.message || (status === 401 ? "Invalid email/password." : "Login failed.")
   } finally {
     loading.value = false
   }
@@ -68,32 +66,35 @@ async function onSubmit() {
   margin: 0 auto;
   padding: 16px;
 }
-
 .card {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   max-width: 420px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid #ddd;
+  border-radius: 10px;
+}
+label {
+  font-weight: 600;
+}
+input {
+  padding: 10px;
+  border: 1px solid #ccc;
   border-radius: 8px;
 }
-
-input {
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-}
-
 button {
   padding: 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #333;
+  cursor: pointer;
 }
-
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .error {
   color: #b00020;
 }
-
 .muted {
   opacity: 0.7;
 }
