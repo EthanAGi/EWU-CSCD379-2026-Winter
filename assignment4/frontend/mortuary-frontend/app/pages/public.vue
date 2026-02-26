@@ -13,12 +13,14 @@
       {{ errorMessage }}
     </div>
 
-    <div v-else class="card" style="margin-bottom: 14px">
-      <div class="row" style="justify-content: space-between; align-items: center">
-        <div class="muted small">
+    <div v-else class="card statusCard">
+      <div class="row statusRow">
+        <div class="muted small statusText">
           Signed in:
           <strong>{{ isLoggedIn ? "Yes" : "No" }}</strong>
-          <span v-if="isLoggedIn"> • Roles: <strong>{{ (authRoles || []).join(", ") || "—" }}</strong></span>
+          <span v-if="isLoggedIn">
+            • Roles: <strong>{{ (authRoles || []).join(", ") || "—" }}</strong>
+          </span>
         </div>
 
         <button class="btn" type="button" @click="refreshAll" :disabled="pending">
@@ -35,42 +37,45 @@
       </div>
     </div>
 
-    <table v-if="cases.length" class="table">
-      <thead>
-        <tr>
-          <th>Case #</th>
-          <th>Status</th>
-          <th>Created</th>
+    <!-- ✅ Responsive table wrapper to prevent horizontal overflow on mobile -->
+    <div v-if="cases.length" class="tableWrap">
+      <table class="table" aria-label="Cases table">
+        <thead>
+          <tr>
+            <th>Case #</th>
+            <th>Status</th>
+            <th>Created</th>
 
-          <th v-if="canSeeVerbose">Decedent</th>
-          <th v-if="canSeeVerbose">Assigned Mortician</th>
+            <th v-if="canSeeVerbose">Decedent</th>
+            <th v-if="canSeeVerbose">Assigned Mortician</th>
 
-          <th v-if="canSeeVerbose" style="width: 110px">Details</th>
-        </tr>
-      </thead>
+            <th v-if="canSeeVerbose" class="colDetails">Details</th>
+          </tr>
+        </thead>
 
-      <tbody>
-        <tr v-for="c in cases" :key="c.caseNumber">
-          <td>{{ c.caseNumber }}</td>
-          <td>{{ c.status }}</td>
-          <td>{{ formatDate(c.createdAt) }}</td>
+        <tbody>
+          <tr v-for="c in cases" :key="c.caseNumber">
+            <td class="nowrap">{{ c.caseNumber }}</td>
+            <td class="nowrap">{{ c.status }}</td>
+            <td class="nowrap">{{ formatDate(c.createdAt) }}</td>
 
-          <td v-if="canSeeVerbose">
-            {{ verboseByCase[c.caseNumber]?.decedentName ?? "—" }}
-          </td>
+            <td v-if="canSeeVerbose">
+              {{ verboseByCase[c.caseNumber]?.decedentName ?? "—" }}
+            </td>
 
-          <td v-if="canSeeVerbose">
-            {{ verboseByCase[c.caseNumber]?.assignedMorticianName ?? "—" }}
-          </td>
+            <td v-if="canSeeVerbose">
+              {{ verboseByCase[c.caseNumber]?.assignedMorticianName ?? "—" }}
+            </td>
 
-          <td v-if="canSeeVerbose">
-            <button class="btn" type="button" @click="toggleRow(c.caseNumber)">
-              {{ openCaseNumber === c.caseNumber ? "Hide" : "Open" }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <td v-if="canSeeVerbose">
+              <button class="btn btnSmall" type="button" @click="toggleRow(c.caseNumber)">
+                {{ openCaseNumber === c.caseNumber ? "Hide" : "Open" }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-else class="muted">No cases found.</div>
 
@@ -147,7 +152,7 @@
           <div v-if="!(openDetails.notes?.length)" class="muted small">No notes.</div>
           <ul v-else class="list">
             <li v-for="n in openDetails.notes" :key="n.id">
-              <div>{{ n.text }}</div>
+              <div class="break">{{ n.text }}</div>
               <div class="muted small">{{ formatDate(n.createdAt) }}</div>
             </li>
           </ul>
@@ -158,7 +163,7 @@
           <div v-if="!(openDetails.equipmentCheckouts?.length)" class="muted small">No equipment checkouts.</div>
           <ul v-else class="list">
             <li v-for="ec in openDetails.equipmentCheckouts" :key="ec.id">
-              <div>
+              <div class="break">
                 <strong>{{ ec.equipment?.name ?? "Equipment" }}</strong>
                 <span class="muted small" v-if="ec.equipment?.serialNumber">
                   ({{ ec.equipment.serialNumber }})
@@ -168,7 +173,7 @@
                 Checked out: {{ formatDate(ec.checkedOutAt) }}
                 <span v-if="ec.returnedAt"> • Returned: {{ formatDate(ec.returnedAt) }}</span>
               </div>
-              <div class="muted small" v-if="ec.notes">Notes: {{ ec.notes }}</div>
+              <div class="muted small break" v-if="ec.notes">Notes: {{ ec.notes }}</div>
             </li>
           </ul>
         </div>
@@ -290,16 +295,13 @@ function apiUrl(path: string) {
  * ----------------------------- */
 const { token, roles, isLoggedIn, loadFromStorage, fetchMe } = useAuth()
 
-// expose roles for template
 const authRoles = computed(() => roles.value ?? [])
 
-// Use roles to gate verbose content
 const canSeeVerbose = computed(() => {
   const rs = authRoles.value
   return rs.includes("Admin") || rs.includes("Mortician")
 })
 
-// Helper for protected calls
 function authHeaders(): Record<string, string> {
   return token.value ? { Authorization: `Bearer ${token.value}` } : {}
 }
@@ -311,7 +313,6 @@ const cases = ref<PublicCase[]>([])
 const pending = ref(true)
 const errorMessage = ref<string | null>(null)
 
-// ✅ store *both* a string label and the full object if present
 const verboseByCase = ref<
   Record<
     string,
@@ -358,7 +359,6 @@ async function loadPublicList() {
   errorMessage.value = null
 
   try {
-    // ✅ FIX: use apiUrl so prod calls your App Service, not SWA /api
     cases.value = await $fetch<PublicCase[]>(apiUrl("/api/public/cases"))
   } catch (e: any) {
     errorMessage.value = e?.data?.message || e?.message || "Failed to load cases."
@@ -377,13 +377,17 @@ async function loadVerboseExtras() {
 
   const map: Record<
     string,
-    { decedentName: string; assignedMorticianName: string | null; assignedMorticianUserId: string | null; assignedMortician: MorticianLite | null }
+    {
+      decedentName: string
+      assignedMorticianName: string | null
+      assignedMorticianUserId: string | null
+      assignedMortician: MorticianLite | null
+    }
   > = {}
 
   await Promise.all(
     (cases.value ?? []).map(async (c) => {
       try {
-        // 1) public-details endpoint (protected)
         const d = await $fetch<CaseDetailsDto>(apiUrl(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`), {
           headers: authHeaders(),
         })
@@ -392,7 +396,6 @@ async function loadVerboseExtras() {
         const last = d.decedent?.lastName?.trim() ?? ""
         const decedentName = (first + " " + last).trim() || "—"
 
-        // 2) reliable assigned mortician from /api/cases/{caseNumber}
         let assigned: MorticianLite | null = null
         let assignedUserId: string | null = (d.assignedMorticianUserId ?? null) as any
 
@@ -445,12 +448,10 @@ async function toggleRow(caseNumber: string) {
       headers: authHeaders(),
     })
 
-    // ✅ Patch in assigned mortician from fixed /api/cases/{caseNumber}
     try {
-      const fixed = await $fetch<{ assignedMortician: MorticianLite | null }>(
-        apiUrl(`/api/cases/${encodeURIComponent(caseNumber)}`),
-        { headers: authHeaders() }
-      )
+      const fixed = await $fetch<{ assignedMortician: MorticianLite | null }>(apiUrl(`/api/cases/${encodeURIComponent(caseNumber)}`), {
+        headers: authHeaders(),
+      })
       if (openDetails.value) {
         openDetails.value.assignedMortician = fixed?.assignedMortician ?? openDetails.value.assignedMortician ?? null
       }
@@ -480,16 +481,22 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* ✅ Prevent "page wider than navbar" on mobile */
 .wrap {
   max-width: 1100px;
   margin: 0 auto;
   padding: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: clip; /* avoids horizontal scroll from long content */
 }
 
+/* Common utilities */
 .row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .muted {
@@ -503,34 +510,7 @@ onMounted(async () => {
   color: #b00020;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 12px;
-}
-.table th,
-.table td {
-  border: 1px solid #ddd;
-  padding: 8px;
-  text-align: left;
-  vertical-align: top;
-}
-.table th {
-  background: #f6f6f6;
-}
-
-.btn {
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid #111827;
-  background: white;
-  cursor: pointer;
-}
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
+/* Card */
 .card {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -538,32 +518,122 @@ onMounted(async () => {
   margin-top: 14px;
 }
 
+.statusCard {
+  margin-bottom: 14px;
+}
+
+.statusRow {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.statusText {
+  min-width: 0;
+  overflow-wrap: anywhere; /* roles/email won't force overflow */
+}
+
+/* ✅ Table wrapper: scroll inside wrapper instead of breaking layout */
+.tableWrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+}
+
+/* Optional: nicer scrollbar behavior */
+.tableWrap::-webkit-scrollbar {
+  height: 10px;
+}
+.tableWrap::-webkit-scrollbar-thumb {
+  background: rgba(17, 24, 39, 0.25);
+  border-radius: 999px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  min-width: 720px; /* ✅ forces horizontal scroll on small screens instead of squishing/overflowing */
+  background: white;
+}
+
+.table th,
+.table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  background: #f6f6f6;
+}
+
+.colDetails {
+  width: 110px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* Buttons */
+.btn {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #111827;
+  background: white;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btnSmall {
+  padding: 6px 10px;
+}
+
+/* Details */
 .detailsHead {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap; /* ✅ avoid overflow when title is long */
+  min-width: 0;
 }
 
 .h2 {
   margin: 0;
   font-size: 18px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .stack {
   display: grid;
   gap: 10px;
   margin-top: 10px;
+  min-width: 0;
 }
 
+/* ✅ Desktop: 2 columns; Mobile: stack */
 .kv {
   display: grid;
   grid-template-columns: 180px 1fr;
   gap: 10px;
+  min-width: 0;
 }
 
 .k {
   font-weight: 600;
+}
+
+.v {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .section {
@@ -580,5 +650,39 @@ onMounted(async () => {
 .list {
   margin: 0;
   padding-left: 18px;
+}
+
+.break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ✅ Mobile tweaks */
+@media (max-width: 720px) {
+  .wrap {
+    padding: 12px;
+  }
+
+  .statusRow {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .table {
+    min-width: 640px; /* still scrolls, but a bit tighter */
+  }
+
+  .kv {
+    grid-template-columns: 1fr; /* ✅ stack labels/values on mobile */
+  }
+
+  .k {
+    opacity: 0.85;
+  }
 }
 </style>
