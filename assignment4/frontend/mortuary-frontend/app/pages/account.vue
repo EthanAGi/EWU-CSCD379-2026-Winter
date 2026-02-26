@@ -3,91 +3,138 @@
   <div v-if="!canViewAnything"></div>
 
   <!-- Mortician sees a blank page -->
-  <main v-else-if="isMortician && !isAdmin" class="wrap"></main>
+  <main v-else-if="isMortician && !isAdmin" class="page">
+    <div class="wrap"></div>
+  </main>
 
   <!-- Admin UI -->
-  <main v-else class="wrap">
-    <h1>Account</h1>
+  <main v-else class="page">
+    <div class="wrap">
+      <h1>Account</h1>
 
-    <div class="toolbar">
-      <input
-        v-model="query"
-        class="search"
-        type="text"
-        placeholder="Search users by email or display name..."
-      />
-      <button class="btn" type="button" @click="loadUsers" :disabled="loading">
-        {{ loading ? "Loading..." : "Refresh" }}
-      </button>
-    </div>
+      <div class="toolbar">
+        <input
+          v-model="query"
+          class="search"
+          type="text"
+          placeholder="Search users by email or display name..."
+        />
+        <button class="btn" type="button" @click="loadUsers" :disabled="loading">
+          {{ loading ? "Loading..." : "Refresh" }}
+        </button>
+      </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error">{{ error }}</p>
 
-    <div class="card" v-if="filteredUsers.length">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Display Name</th>
-            <th>Status</th>
-            <th style="width: 220px;">Role</th>
-            <th style="width: 260px;">Actions</th>
-          </tr>
-        </thead>
+      <div class="card tableCard" v-if="filteredUsers.length">
+        <!-- ✅ Desktop table (NO scrollbars) -->
+        <div class="tableWrap" aria-label="Users table">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Display Name</th>
+                <th>Status</th>
+                <th class="colRole">Role</th>
+                <th class="colActions">Actions</th>
+              </tr>
+            </thead>
 
-        <tbody>
-          <tr v-for="u in filteredUsers" :key="u.id">
-            <td>{{ u.email }}</td>
-            <td>{{ u.displayName ?? "-" }}</td>
+            <tbody>
+              <tr v-for="u in filteredUsers" :key="u.id">
+                <td class="break">{{ u.email }}</td>
+                <td class="break">{{ u.displayName ?? "-" }}</td>
 
-            <!-- Status -->
-            <td>
-              <span :class="u.isDisabled ? 'badge disabled' : 'badge enabled'">
-                {{ u.isDisabled ? "Disabled" : "Enabled" }}
-              </span>
-              <div v-if="u.isDisabled && u.lockoutEndUtc" class="muted small">
-                Until: {{ formatUtc(u.lockoutEndUtc) }}
+                <td>
+                  <span :class="u.isDisabled ? 'badge disabled' : 'badge enabled'">
+                    {{ u.isDisabled ? "Disabled" : "Enabled" }}
+                  </span>
+                  <div v-if="u.isDisabled && u.lockoutEndUtc" class="muted small">
+                    Until: {{ formatUtc(u.lockoutEndUtc) }}
+                  </div>
+                </td>
+
+                <td>
+                  <select class="select" v-model="u.editRole">
+                    <option value="">None</option>
+                    <option value="Mortician">Mortician</option>
+                    <option value="Admin">Admin</option>
+                  </select>
+                  <div class="muted small">Current: {{ u.role || "None" }}</div>
+                </td>
+
+                <td>
+                  <div class="actions">
+                    <button class="btn" type="button" @click="saveRole(u)" :disabled="u.saving">
+                      {{ u.saving ? "Saving..." : "Save Role" }}
+                    </button>
+
+                    <!-- ✅ Removed Enable/Disable button per request -->
+
+                    <button class="btn danger" type="button" @click="deleteUser(u)" :disabled="u.deleting">
+                      {{ u.deleting ? "Deleting..." : "Delete" }}
+                    </button>
+                  </div>
+
+                  <div v-if="u.saveError" class="error small">{{ u.saveError }}</div>
+                  <div v-if="u.saved" class="ok small">Saved</div>
+                  <div v-if="u.actionOk" class="ok small">{{ u.actionOk }}</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ✅ Mobile cards -->
+        <div class="mobileList">
+          <article v-for="u in filteredUsers" :key="u.id" class="userCard">
+            <div class="userTop">
+              <div class="userIdentity">
+                <div class="userEmail break">{{ u.email }}</div>
+                <div class="muted small break">{{ u.displayName ?? "-" }}</div>
               </div>
-            </td>
 
-            <!-- ✅ Single role selector: None | Mortician | Admin -->
-            <td>
+              <div class="userStatus">
+                <span :class="u.isDisabled ? 'badge disabled' : 'badge enabled'">
+                  {{ u.isDisabled ? "Disabled" : "Enabled" }}
+                </span>
+                <div v-if="u.isDisabled && u.lockoutEndUtc" class="muted small">
+                  Until: {{ formatUtc(u.lockoutEndUtc) }}
+                </div>
+              </div>
+            </div>
+
+            <div class="userRow">
+              <div class="muted small">Role</div>
               <select class="select" v-model="u.editRole">
                 <option value="">None</option>
                 <option value="Mortician">Mortician</option>
                 <option value="Admin">Admin</option>
               </select>
-              <div class="muted small">
-                Current: {{ u.role || "None" }}
-              </div>
-            </td>
+              <div class="muted small">Current: {{ u.role || "None" }}</div>
+            </div>
 
-            <!-- Actions -->
-            <td>
-              <div class="actions">
-                <button class="btn" type="button" @click="saveRole(u)" :disabled="u.saving">
-                  {{ u.saving ? "Saving..." : "Save Role" }}
-                </button>
+            <div class="userActions">
+              <button class="btn" type="button" @click="saveRole(u)" :disabled="u.saving">
+                {{ u.saving ? "Saving..." : "Save Role" }}
+              </button>
 
-                <button class="btn" type="button" @click="toggleEnabled(u)" :disabled="u.toggling">
-                  {{ u.toggling ? "Working..." : u.isDisabled ? "Enable" : "Disable" }}
-                </button>
+              <!-- ✅ Removed Enable/Disable button per request -->
 
-                <button class="btn danger" type="button" @click="deleteUser(u)" :disabled="u.deleting">
-                  {{ u.deleting ? "Deleting..." : "Delete" }}
-                </button>
-              </div>
+              <button class="btn danger" type="button" @click="deleteUser(u)" :disabled="u.deleting">
+                {{ u.deleting ? "Deleting..." : "Delete" }}
+              </button>
+            </div>
 
-              <div v-if="u.saveError" class="error small">{{ u.saveError }}</div>
-              <div v-if="u.saved" class="ok small">Saved</div>
-              <div v-if="u.actionOk" class="ok small">{{ u.actionOk }}</div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            <div v-if="u.saveError" class="error small" style="margin-top: 8px">{{ u.saveError }}</div>
+            <div v-if="u.saved" class="ok small" style="margin-top: 8px">Saved</div>
+            <div v-if="u.actionOk" class="ok small" style="margin-top: 8px">{{ u.actionOk }}</div>
+          </article>
+        </div>
+      </div>
+
+      <p v-else-if="!loading && !error" class="muted">No users found.</p>
     </div>
-
-    <p v-else-if="!loading && !error" class="muted">No users found.</p>
   </main>
 </template>
 
@@ -109,14 +156,11 @@ type ApiUser = {
 type Role = "" | "Admin" | "Mortician"
 
 type UiUser = ApiUser & {
-  // ✅ exactly one role in UI (or none)
   role: Role
   editRole: Role
-
   saving: boolean
   saved: boolean
   saveError: string | null
-  toggling: boolean
   deleting: boolean
   actionOk: string | null
 }
@@ -124,11 +168,6 @@ type UiUser = ApiUser & {
 type SetRoleRequest = {
   userId: string
   role: "Admin" | "Mortician"
-  enabled: boolean
-}
-
-type SetEnabledRequest = {
-  userId: string
   enabled: boolean
 }
 
@@ -161,13 +200,6 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${t}` }
 }
 
-/**
- * ✅ Minimal single-role normalization:
- * - If roles contain Admin => Admin
- * - Else if roles contain Mortician => Mortician
- * - Else => None
- * (If your DB has both, Admin "wins" here, but we’ll fix it on save.)
- */
 function pickSingleRole(rs: string[] | null | undefined): Role {
   const set = new Set((rs ?? []).map((x) => (x ?? "").trim()))
   if (set.has("Admin")) return "Admin"
@@ -205,18 +237,13 @@ async function loadUsers() {
 
     users.value = (list ?? []).map((u) => {
       const role = pickSingleRole(u.roles)
-
       return {
         ...u,
-        // store roles as-is from API, but drive UI from single role
         role,
         editRole: role,
-
         saving: false,
         saved: false,
         saveError: null,
-
-        toggling: false,
         deleting: false,
         actionOk: null,
       }
@@ -237,13 +264,6 @@ async function setRole(userId: string, role: "Admin" | "Mortician", enabled: boo
   })
 }
 
-/**
- * ✅ Minimal enforcement:
- * Desired role is exactly one of: "" | "Admin" | "Mortician"
- * We ensure:
- * - enable desired role (if not "")
- * - disable the other role (always)
- */
 async function saveRole(u: UiUser) {
   u.saving = true
   u.saved = false
@@ -260,16 +280,13 @@ async function saveRole(u: UiUser) {
       return
     }
 
-    // Always remove both first (safe + minimal logic).
-    // If backend is idempotent, this is fine.
+    // remove both roles, then add desired role (if any)
     await setRole(u.id, "Admin", false)
     await setRole(u.id, "Mortician", false)
 
-    // Then apply the one role (if any).
     if (desired === "Admin") await setRole(u.id, "Admin", true)
     if (desired === "Mortician") await setRole(u.id, "Mortician", true)
 
-    // Update UI state
     u.role = desired
     u.roles = desired ? [desired] : []
     u.editRole = desired
@@ -280,35 +297,6 @@ async function saveRole(u: UiUser) {
     u.saveError = e?.data?.message || e?.message || "Failed to save role."
   } finally {
     u.saving = false
-  }
-}
-
-async function toggleEnabled(u: UiUser) {
-  u.toggling = true
-  u.saveError = null
-  u.actionOk = null
-
-  try {
-    const payload: SetEnabledRequest = {
-      userId: u.id,
-      enabled: u.isDisabled, // if disabled -> enable; if enabled -> disable
-    }
-
-    const res = await $fetch<any>(apiUrl("/api/admin/users/set-enabled"), {
-      method: "POST",
-      headers: authHeaders(),
-      body: payload,
-    })
-
-    u.isDisabled = !!(res?.isDisabled ?? res?.IsDisabled)
-    u.lockoutEndUtc = (res?.lockoutEndUtc ?? res?.LockoutEndUtc ?? null) as any
-
-    u.actionOk = u.isDisabled ? "User disabled." : "User enabled."
-    setTimeout(() => (u.actionOk = null), 1200)
-  } catch (e: any) {
-    u.saveError = e?.data?.message || e?.message || "Failed to change enabled status."
-  } finally {
-    u.toggling = false
   }
 }
 
@@ -343,10 +331,16 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.page {
+  width: 100%;
+}
+
 .wrap {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 24px 18px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .toolbar {
@@ -360,20 +354,21 @@ onMounted(async () => {
   flex: 1;
   padding: 10px;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 10px;
+  min-width: 0;
 }
 
 .select {
   width: 100%;
   padding: 10px;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 10px;
   background: white;
 }
 
 .btn {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid #111827;
   background: white;
   cursor: pointer;
@@ -391,20 +386,35 @@ onMounted(async () => {
 
 .card {
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
+  background: white;
 }
 
+.tableCard {
+  margin-top: 10px;
+}
+
+/* ✅ Kill any horizontal scrollbars at this level */
+.tableWrap {
+  width: 100%;
+  overflow: hidden; /* ✅ prevents scrollbars */
+}
+
+/* ✅ Make the table fit the container */
 .table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: auto; /* ✅ allow browser to size columns naturally */
 }
 
+/* Keep headers readable */
 thead th {
   text-align: left;
   background: #f8fafc;
   padding: 12px;
   border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
 }
 
 tbody td {
@@ -413,18 +423,29 @@ tbody td {
   vertical-align: top;
 }
 
+/* Column sizing */
+.colRole {
+  width: 220px;
+}
+.colActions {
+  width: 280px; /* slightly smaller since we removed a button */
+}
+
+/* Actions wrap */
 .actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
 
+/* Badges */
 .badge {
   display: inline-block;
   padding: 4px 8px;
   border-radius: 999px;
   font-size: 12px;
   border: 1px solid #cbd5e1;
+  white-space: nowrap;
 }
 
 .enabled {
@@ -453,5 +474,84 @@ tbody td {
 .small {
   font-size: 12px;
   margin-top: 6px;
+}
+
+.break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Mobile list */
+.mobileList {
+  display: none;
+  padding: 12px;
+  gap: 12px;
+}
+
+.userCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: white;
+}
+
+.userTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.userIdentity {
+  min-width: 0;
+}
+
+.userEmail {
+  font-weight: 700;
+}
+
+.userStatus {
+  text-align: right;
+}
+
+.userRow {
+  display: grid;
+  gap: 6px;
+}
+
+.userActions {
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .wrap {
+    padding: 14px 12px;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Hide table on mobile, show cards */
+  .tableWrap {
+    display: none;
+  }
+
+  .mobileList {
+    display: grid;
+  }
+
+  .userStatus {
+    text-align: left;
+  }
 }
 </style>
