@@ -32,6 +32,9 @@ jobs:
       - name: Build
         run: dotnet build "${{ env.PROJECT_PATH }}" -c Release --no-restore
 
+      - name: Run unit tests
+        run: dotnet test "assignment4/backend/MortuaryAssistant.Api.Tests/MortuaryAssistant.Api.Tests.csproj" --no-build --verbosity minimal
+
       - name: Publish
         run: dotnet publish "${{ env.PROJECT_PATH }}" -c Release -o "${{ env.PUBLISH_DIR }}" --no-build
 
