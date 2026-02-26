@@ -3,17 +3,17 @@
     <h1>Public Case Board</h1>
 
     <p class="muted">
-      Shows case status information from the database (public requirement). Admins and Morticians can view
-      additional details.
+      Shows case status information from the database (public requirement). Admins and Morticians can view additional
+      details.
     </p>
 
-    <div v-if="pending">Loading…</div>
-
-    <div v-else-if="errorMessage" class="error">
-      {{ errorMessage }}
+    <!-- ✅ Top loading bar (shows whenever the page is loading ANY data) -->
+    <div class="loadingBar" :class="{ show: isBusy }" aria-hidden="true">
+      <div class="loadingBarInner"></div>
     </div>
 
-    <div v-else class="card statusCard">
+    <!-- Status card always renders (so layout doesn't jump) -->
+    <div class="card statusCard">
       <div class="row statusRow">
         <div class="muted small statusText">
           Signed in:
@@ -23,8 +23,8 @@
           </span>
         </div>
 
-        <button class="btn" type="button" @click="refreshAll" :disabled="pending">
-          Refresh
+        <button class="btn" type="button" @click="refreshAll" :disabled="isBusy">
+          {{ isBusy ? "Loading..." : "Refresh" }}
         </button>
       </div>
 
@@ -32,14 +32,17 @@
         Limited view: sign in as Admin or Mortician to see decedent and case details.
       </div>
 
-      <div v-else class="muted small" style="margin-top: 8px">
-        Verbose view enabled.
-      </div>
+      <div v-else class="muted small" style="margin-top: 8px">Verbose view enabled.</div>
     </div>
 
-    <!-- ✅ Responsive table wrapper to prevent horizontal overflow on mobile -->
-    <div v-if="cases.length" class="tableWrap">
-      <table class="table" aria-label="Cases table">
+    <!-- ✅ Errors -->
+    <div v-if="errorMessage" class="error" style="margin-top: 12px">
+      {{ errorMessage }}
+    </div>
+
+    <!-- ✅ Page skeleton while loading initial list -->
+    <div v-if="pending" class="tableWrap" aria-label="Loading cases">
+      <table class="table" aria-label="Cases table loading">
         <thead>
           <tr>
             <th>Case #</th>
@@ -54,133 +57,182 @@
         </thead>
 
         <tbody>
-          <tr v-for="c in cases" :key="c.caseNumber">
-            <td class="nowrap">{{ c.caseNumber }}</td>
-            <td class="nowrap">{{ c.status }}</td>
-            <td class="nowrap">{{ formatDate(c.createdAt) }}</td>
+          <tr v-for="i in skeletonRows" :key="i">
+            <td><div class="sk skText wSm"></div></td>
+            <td><div class="sk skText wSm"></div></td>
+            <td><div class="sk skText wMd"></div></td>
+
+            <td v-if="canSeeVerbose"><div class="sk skText wLg"></div></td>
+            <td v-if="canSeeVerbose"><div class="sk skText wLg"></div></td>
 
             <td v-if="canSeeVerbose">
-              {{ verboseByCase[c.caseNumber]?.decedentName ?? "—" }}
-            </td>
-
-            <td v-if="canSeeVerbose">
-              {{ verboseByCase[c.caseNumber]?.assignedMorticianName ?? "—" }}
-            </td>
-
-            <td v-if="canSeeVerbose">
-              <button class="btn btnSmall" type="button" @click="toggleRow(c.caseNumber)">
-                {{ openCaseNumber === c.caseNumber ? "Hide" : "Open" }}
-              </button>
+              <div class="sk skBtn"></div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <div v-else class="muted">No cases found.</div>
+    <!-- ✅ Loaded content -->
+    <template v-else>
+      <!-- Responsive table wrapper to prevent horizontal overflow on mobile -->
+      <div v-if="cases.length" class="tableWrap">
+        <table class="table" aria-label="Cases table">
+          <thead>
+            <tr>
+              <th>Case #</th>
+              <th>Status</th>
+              <th>Created</th>
 
-    <!-- Expanded details preview (Admin/Mortician only) -->
-    <div v-if="canSeeVerbose && openCaseNumber" class="details card">
-      <div class="detailsHead">
-        <h2 class="h2">Case Details: {{ openCaseNumber }}</h2>
-        <button class="btn" type="button" @click="closeDetails">Close</button>
+              <th v-if="canSeeVerbose">Decedent</th>
+              <th v-if="canSeeVerbose">Assigned Mortician</th>
+
+              <th v-if="canSeeVerbose" class="colDetails">Details</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr v-for="c in cases" :key="c.caseNumber">
+              <td class="nowrap">{{ c.caseNumber }}</td>
+              <td class="nowrap">{{ c.status }}</td>
+              <td class="nowrap">{{ formatDate(c.createdAt) }}</td>
+
+              <td v-if="canSeeVerbose">
+                <!-- ✅ subtle inline skeleton while verbose extras load -->
+                <template v-if="verbosePending && !verboseByCase[c.caseNumber]">
+                  <div class="sk skText wLg" style="height: 14px"></div>
+                </template>
+                <template v-else>
+                  {{ verboseByCase[c.caseNumber]?.decedentName ?? "—" }}
+                </template>
+              </td>
+
+              <td v-if="canSeeVerbose">
+                <template v-if="verbosePending && !verboseByCase[c.caseNumber]">
+                  <div class="sk skText wLg" style="height: 14px"></div>
+                </template>
+                <template v-else>
+                  {{ verboseByCase[c.caseNumber]?.assignedMorticianName ?? "—" }}
+                </template>
+              </td>
+
+              <td v-if="canSeeVerbose">
+                <button class="btn btnSmall" type="button" @click="toggleRow(c.caseNumber)" :disabled="detailsPending">
+                  {{ openCaseNumber === c.caseNumber ? "Hide" : "Open" }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div v-if="detailsError" class="error">{{ detailsError }}</div>
-      <div v-else-if="detailsPending" class="muted">Loading details…</div>
+      <div v-else class="muted">No cases found.</div>
 
-      <div v-else-if="openDetails" class="stack">
-        <div class="kv"><span class="k">Case #</span><span class="v">{{ openDetails.caseNumber }}</span></div>
-        <div class="kv"><span class="k">Status</span><span class="v">{{ openDetails.status }}</span></div>
-        <div class="kv"><span class="k">Created</span><span class="v">{{ formatDate(openDetails.createdAt) }}</span></div>
-        <div class="kv"><span class="k">Next of Kin</span><span class="v">{{ openDetails.nextOfKinName || "—" }}</span></div>
-
-        <div class="kv">
-          <span class="k">Assigned Mortician</span>
-          <span class="v">
-            {{
-              openDetails.assignedMortician?.displayName ??
-              openDetails.assignedMortician?.email ??
-              "—"
-            }}
-          </span>
+      <!-- Expanded details preview (Admin/Mortician only) -->
+      <div v-if="canSeeVerbose && openCaseNumber" class="details card">
+        <div class="detailsHead">
+          <h2 class="h2">Case Details: {{ openCaseNumber }}</h2>
+          <button class="btn" type="button" @click="closeDetails">Close</button>
         </div>
 
-        <div class="section">
-          <div class="sectionTitle">Decedent</div>
-          <div v-if="!openDetails.decedent" class="muted small">No decedent on file.</div>
-          <div v-else class="stack">
-            <div class="kv">
-              <span class="k">Name</span>
-              <span class="v">
-                {{ (openDetails.decedent.firstName || "") + " " + (openDetails.decedent.lastName || "") }}
-              </span>
+        <div v-if="detailsError" class="error">{{ detailsError }}</div>
+        <div v-else-if="detailsPending" class="muted">Loading details…</div>
+
+        <div v-else-if="openDetails" class="stack">
+          <div class="kv"><span class="k">Case #</span><span class="v">{{ openDetails.caseNumber }}</span></div>
+          <div class="kv"><span class="k">Status</span><span class="v">{{ openDetails.status }}</span></div>
+          <div class="kv">
+            <span class="k">Created</span><span class="v">{{ formatDate(openDetails.createdAt) }}</span>
+          </div>
+          <div class="kv"><span class="k">Next of Kin</span><span class="v">{{ openDetails.nextOfKinName || "—" }}</span></div>
+
+          <div class="kv">
+            <span class="k">Assigned Mortician</span>
+            <span class="v">
+              {{
+                openDetails.assignedMortician?.displayName ??
+                openDetails.assignedMortician?.email ??
+                "—"
+              }}
+            </span>
+          </div>
+
+          <div class="section">
+            <div class="sectionTitle">Decedent</div>
+            <div v-if="!openDetails.decedent" class="muted small">No decedent on file.</div>
+            <div v-else class="stack">
+              <div class="kv">
+                <span class="k">Name</span>
+                <span class="v">
+                  {{ (openDetails.decedent.firstName || "") + " " + (openDetails.decedent.lastName || "") }}
+                </span>
+              </div>
+              <div class="kv"><span class="k">DOB</span><span class="v">{{ formatDate(openDetails.decedent.dateOfBirth) }}</span></div>
+              <div class="kv"><span class="k">DOD</span><span class="v">{{ formatDate(openDetails.decedent.dateOfDeath) }}</span></div>
+              <div class="kv"><span class="k">Place of death</span><span class="v">{{ openDetails.decedent.placeOfDeath || "—" }}</span></div>
+              <div class="kv"><span class="k">Tag #</span><span class="v">{{ openDetails.decedent.tagNumber || "—" }}</span></div>
+              <div class="kv"><span class="k">Storage</span><span class="v">{{ openDetails.decedent.storageLocation || "—" }}</span></div>
             </div>
-            <div class="kv"><span class="k">DOB</span><span class="v">{{ formatDate(openDetails.decedent.dateOfBirth) }}</span></div>
-            <div class="kv"><span class="k">DOD</span><span class="v">{{ formatDate(openDetails.decedent.dateOfDeath) }}</span></div>
-            <div class="kv"><span class="k">Place of death</span><span class="v">{{ openDetails.decedent.placeOfDeath || "—" }}</span></div>
-            <div class="kv"><span class="k">Tag #</span><span class="v">{{ openDetails.decedent.tagNumber || "—" }}</span></div>
-            <div class="kv"><span class="k">Storage</span><span class="v">{{ openDetails.decedent.storageLocation || "—" }}</span></div>
+          </div>
+
+          <div class="section">
+            <div class="sectionTitle">Tasks ({{ openDetails.tasks?.length ?? 0 }})</div>
+            <div v-if="!(openDetails.tasks?.length)" class="muted small">No tasks.</div>
+            <ul v-else class="list">
+              <li v-for="t in openDetails.tasks" :key="t.id">
+                <div class="muted small">
+                  {{ t.workflowStepTemplate?.sortOrder ?? "?" }} —
+                  <strong>{{ t.workflowStepTemplate?.name ?? "Step" }}</strong>
+                  ({{ t.status }})
+                </div>
+                <div class="muted small" v-if="t.workflowStepTemplate?.description">
+                  {{ t.workflowStepTemplate.description }}
+                </div>
+                <div class="muted small">
+                  Created: {{ formatDate(t.createdAt) }}
+                  <span v-if="t.startedAt"> • Started: {{ formatDate(t.startedAt) }}</span>
+                  <span v-if="t.completedAt"> • Done: {{ formatDate(t.completedAt) }}</span>
+                </div>
+                <div v-if="t.notes" class="muted small">Notes: {{ t.notes }}</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <div class="sectionTitle">Notes ({{ openDetails.notes?.length ?? 0 }})</div>
+            <div v-if="!(openDetails.notes?.length)" class="muted small">No notes.</div>
+            <ul v-else class="list">
+              <li v-for="n in openDetails.notes" :key="n.id">
+                <div class="break">{{ n.text }}</div>
+                <div class="muted small">{{ formatDate(n.createdAt) }}</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <div class="sectionTitle">Equipment Checkouts ({{ openDetails.equipmentCheckouts?.length ?? 0 }})</div>
+            <div v-if="!(openDetails.equipmentCheckouts?.length)" class="muted small">No equipment checkouts.</div>
+            <ul v-else class="list">
+              <li v-for="ec in openDetails.equipmentCheckouts" :key="ec.id">
+                <div class="break">
+                  <strong>{{ ec.equipment?.name ?? "Equipment" }}</strong>
+                  <span class="muted small" v-if="ec.equipment?.serialNumber">
+                    ({{ ec.equipment.serialNumber }})
+                  </span>
+                </div>
+                <div class="muted small">
+                  Checked out: {{ formatDate(ec.checkedOutAt) }}
+                  <span v-if="ec.returnedAt"> • Returned: {{ formatDate(ec.returnedAt) }}</span>
+                </div>
+                <div class="muted small break" v-if="ec.notes">Notes: {{ ec.notes }}</div>
+              </li>
+            </ul>
           </div>
         </div>
 
-        <div class="section">
-          <div class="sectionTitle">Tasks ({{ openDetails.tasks?.length ?? 0 }})</div>
-          <div v-if="!(openDetails.tasks?.length)" class="muted small">No tasks.</div>
-          <ul v-else class="list">
-            <li v-for="t in openDetails.tasks" :key="t.id">
-              <div class="muted small">
-                {{ t.workflowStepTemplate?.sortOrder ?? "?" }} —
-                <strong>{{ t.workflowStepTemplate?.name ?? "Step" }}</strong>
-                ({{ t.status }})
-              </div>
-              <div class="muted small" v-if="t.workflowStepTemplate?.description">
-                {{ t.workflowStepTemplate.description }}
-              </div>
-              <div class="muted small">
-                Created: {{ formatDate(t.createdAt) }}
-                <span v-if="t.startedAt"> • Started: {{ formatDate(t.startedAt) }}</span>
-                <span v-if="t.completedAt"> • Done: {{ formatDate(t.completedAt) }}</span>
-              </div>
-              <div v-if="t.notes" class="muted small">Notes: {{ t.notes }}</div>
-            </li>
-          </ul>
-        </div>
-
-        <div class="section">
-          <div class="sectionTitle">Notes ({{ openDetails.notes?.length ?? 0 }})</div>
-          <div v-if="!(openDetails.notes?.length)" class="muted small">No notes.</div>
-          <ul v-else class="list">
-            <li v-for="n in openDetails.notes" :key="n.id">
-              <div class="break">{{ n.text }}</div>
-              <div class="muted small">{{ formatDate(n.createdAt) }}</div>
-            </li>
-          </ul>
-        </div>
-
-        <div class="section">
-          <div class="sectionTitle">Equipment Checkouts ({{ openDetails.equipmentCheckouts?.length ?? 0 }})</div>
-          <div v-if="!(openDetails.equipmentCheckouts?.length)" class="muted small">No equipment checkouts.</div>
-          <ul v-else class="list">
-            <li v-for="ec in openDetails.equipmentCheckouts" :key="ec.id">
-              <div class="break">
-                <strong>{{ ec.equipment?.name ?? "Equipment" }}</strong>
-                <span class="muted small" v-if="ec.equipment?.serialNumber">
-                  ({{ ec.equipment.serialNumber }})
-                </span>
-              </div>
-              <div class="muted small">
-                Checked out: {{ formatDate(ec.checkedOutAt) }}
-                <span v-if="ec.returnedAt"> • Returned: {{ formatDate(ec.returnedAt) }}</span>
-              </div>
-              <div class="muted small break" v-if="ec.notes">Notes: {{ ec.notes }}</div>
-            </li>
-          </ul>
-        </div>
+        <div v-else class="muted">No details loaded.</div>
       </div>
-
-      <div v-else class="muted">No details loaded.</div>
-    </div>
+    </template>
   </main>
 </template>
 
@@ -310,8 +362,11 @@ function authHeaders(): Record<string, string> {
  * Page state
  * ----------------------------- */
 const cases = ref<PublicCase[]>([])
-const pending = ref(true)
+const pending = ref(true) // initial list load
+const verbosePending = ref(false) // verbose extras load (per-case details for table columns)
 const errorMessage = ref<string | null>(null)
+
+const skeletonRows = 8
 
 const verboseByCase = ref<
   Record<
@@ -329,6 +384,9 @@ const openCaseNumber = ref<string | null>(null)
 const openDetails = ref<CaseDetailsDto | null>(null)
 const detailsPending = ref(false)
 const detailsError = ref<string | null>(null)
+
+/** ✅ One flag for the top loading bar */
+const isBusy = computed(() => pending.value || verbosePending.value || detailsPending.value)
 
 /** -----------------------------
  * Helpers
@@ -375,6 +433,8 @@ async function loadVerboseExtras() {
     return
   }
 
+  verbosePending.value = true
+
   const map: Record<
     string,
     {
@@ -385,49 +445,53 @@ async function loadVerboseExtras() {
     }
   > = {}
 
-  await Promise.all(
-    (cases.value ?? []).map(async (c) => {
-      try {
-        const d = await $fetch<CaseDetailsDto>(apiUrl(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`), {
-          headers: authHeaders(),
-        })
-
-        const first = d.decedent?.firstName?.trim() ?? ""
-        const last = d.decedent?.lastName?.trim() ?? ""
-        const decedentName = (first + " " + last).trim() || "—"
-
-        let assigned: MorticianLite | null = null
-        let assignedUserId: string | null = (d.assignedMorticianUserId ?? null) as any
-
+  try {
+    await Promise.all(
+      (cases.value ?? []).map(async (c) => {
         try {
-          const fixed = await $fetch<{ assignedMortician: MorticianLite | null; assignedMorticianUserId?: string | null }>(
-            apiUrl(`/api/cases/${encodeURIComponent(c.caseNumber)}`),
-            { headers: authHeaders() }
-          )
-          assigned = fixed?.assignedMortician ?? null
-          assignedUserId = (fixed?.assignedMorticianUserId ?? assignedUserId) as any
+          const d = await $fetch<CaseDetailsDto>(apiUrl(`/api/public/cases/${encodeURIComponent(c.caseNumber)}`), {
+            headers: authHeaders(),
+          })
+
+          const first = d.decedent?.firstName?.trim() ?? ""
+          const last = d.decedent?.lastName?.trim() ?? ""
+          const decedentName = (first + " " + last).trim() || "—"
+
+          let assigned: MorticianLite | null = null
+          let assignedUserId: string | null = (d.assignedMorticianUserId ?? null) as any
+
+          try {
+            const fixed = await $fetch<{ assignedMortician: MorticianLite | null; assignedMorticianUserId?: string | null }>(
+              apiUrl(`/api/cases/${encodeURIComponent(c.caseNumber)}`),
+              { headers: authHeaders() }
+            )
+            assigned = fixed?.assignedMortician ?? null
+            assignedUserId = (fixed?.assignedMorticianUserId ?? assignedUserId) as any
+          } catch {
+            assigned = d.assignedMortician ?? null
+          }
+
+          map[c.caseNumber] = {
+            decedentName,
+            assignedMortician: assigned,
+            assignedMorticianName: morticianLabel(assigned),
+            assignedMorticianUserId: assignedUserId,
+          }
         } catch {
-          assigned = d.assignedMortician ?? null
+          map[c.caseNumber] = {
+            decedentName: "—",
+            assignedMortician: null,
+            assignedMorticianName: null,
+            assignedMorticianUserId: null,
+          }
         }
+      })
+    )
 
-        map[c.caseNumber] = {
-          decedentName,
-          assignedMortician: assigned,
-          assignedMorticianName: morticianLabel(assigned),
-          assignedMorticianUserId: assignedUserId,
-        }
-      } catch {
-        map[c.caseNumber] = {
-          decedentName: "—",
-          assignedMortician: null,
-          assignedMorticianName: null,
-          assignedMorticianUserId: null,
-        }
-      }
-    })
-  )
-
-  verboseByCase.value = map
+    verboseByCase.value = map
+  } finally {
+    verbosePending.value = false
+  }
 }
 
 async function toggleRow(caseNumber: string) {
@@ -489,6 +553,48 @@ onMounted(async () => {
   width: 100%;
   box-sizing: border-box;
   overflow-x: clip; /* avoids horizontal scroll from long content */
+  position: relative;
+}
+
+/* ✅ Top loading bar */
+.loadingBar {
+  position: sticky;
+  top: 0;
+  height: 4px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  background: rgba(17, 24, 39, 0.08);
+  z-index: 10;
+  margin: 10px 0 6px;
+}
+
+.loadingBar.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.loadingBarInner {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.55);
+  animation: loadingSlide 1.1s ease-in-out infinite;
+}
+
+@keyframes loadingSlide {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(120%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 /* Common utilities */
@@ -657,6 +763,57 @@ onMounted(async () => {
   word-break: break-word;
 }
 
+/* ✅ Skeleton styles */
+.sk {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.08);
+}
+
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: shimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+.skText {
+  height: 14px;
+}
+
+.skBtn {
+  height: 30px;
+  width: 72px;
+  border-radius: 10px;
+}
+
+.wSm {
+  width: 90px;
+}
+.wMd {
+  width: 150px;
+}
+.wLg {
+  width: 220px;
+}
+
 /* ✅ Mobile tweaks */
 @media (max-width: 720px) {
   .wrap {
@@ -683,6 +840,10 @@ onMounted(async () => {
 
   .k {
     opacity: 0.85;
+  }
+
+  .loadingBar {
+    margin-top: 8px;
   }
 }
 </style>
