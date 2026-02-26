@@ -16,7 +16,8 @@ public class AdminUserServiceTests
     {
         var store = new Mock<IUserStore<ApplicationUser>>();
         _mockUserManager = new Mock<UserManager<ApplicationUser>>(
-            store.Object, null, null, null, null, null, null, null, null);
+            store.Object,
+            null!, null!, null!, null!, null!, null!, null!, null!);
 
         _adminUserService = new AdminUserService(_mockUserManager.Object);
     }

@@ -17,7 +17,8 @@ public class AuthServiceTests
     {
         var store = new Mock<IUserStore<ApplicationUser>>();
         _mockUserManager = new Mock<UserManager<ApplicationUser>>(
-            store.Object, null, null, null, null, null, null, null, null);
+            store.Object,
+            null!, null!, null!, null!, null!, null!, null!, null!);
 
         _mockConfig = new Mock<IConfiguration>();
         _mockConfig.Setup(x => x["Jwt:Key"]).Returns("my-super-secret-key-that-is-long-enough");
