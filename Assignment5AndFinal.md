@@ -34,12 +34,12 @@ Demo the application and answer classmates' and instructors' questions.
 
 ## Schedule:
 
-Assigned on Thursday, February 26th
-Requirements due in class on Tuesday, March 3rd
-UI due in class on Thursday, March 5th
-Code is submitted into Teams channel by 11:59pm Thursday, March 12th
-Code Review assigned on Friday, March 13th, and is due Sunday, March 15th at 11:59pm
-Final on March 19th 3:30-5:30pm
+- Assigned on Thursday, February 26th
+- Requirements due in class on Tuesday, March 3rd
+- UI due in class on Thursday, March 5th
+- Code is submitted into Teams channel by 11:59pm Thursday, March 12th
+- Code Review assigned on Friday, March 13th, and is due Sunday, March 15th at 11:59pm
+- Final on March 19th 3:30-5:30pm
 
 ### Details:
 
