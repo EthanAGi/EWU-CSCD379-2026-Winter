@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Controllers
 builder.Services.AddControllers();
 
-// ✅ CORS (Nuxt local dev + Azure Static Web App)
+// CORS (Nuxt local dev + Azure Static Web App)
 var corsPolicyName = "ClientCors";
 builder.Services.AddCors(options =>
 {
@@ -25,14 +25,21 @@ builder.Services.AddCors(options =>
     });
 });
 
-// ✅ Register business logic services
+// Register business logic services
 builder.Services.AddScoped<IReviewService, ReviewService>();
 builder.Services.AddScoped<IAnimalService, AnimalService>();
 
-// ✅ Entity Framework + SQL Server
+// Entity Framework + SQL Server + retry on transient failures
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection")
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null);
+        }
     )
 );
 
@@ -42,7 +49,7 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// ✅ Helpful error output
+// Helpful error output
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -65,7 +72,7 @@ app.UseExceptionHandler(errorApp =>
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// ✅ Auto-migrate DB (ONLY if provider is relational)
+// Auto-migrate DB (ONLY if provider is relational)
 // In integration tests you replace SQL Server with EF InMemory,
 // and InMemory is NOT relational, so Migrate() would throw.
 using (var scope = app.Services.CreateScope())
@@ -79,12 +86,12 @@ using (var scope = app.Services.CreateScope())
 
 app.UseHttpsRedirection();
 
-// ✅ Enable CORS BEFORE MapControllers
+// Enable CORS BEFORE MapControllers
 app.UseCors(corsPolicyName);
 
 app.MapControllers();
 
 app.Run();
 
-// 🔥 REQUIRED FOR INTEGRATION TESTS
+// REQUIRED FOR INTEGRATION TESTS
 public partial class Program { }
